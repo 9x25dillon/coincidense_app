@@ -1,0 +1,432 @@
+# Source manifest for Coincidence App.
+#
+# READ THIS BEFORE USING ANY ENTRY.
+#
+# Every entry is `verified: false`. URLs and identifiers here were assembled from working
+# knowledge as a research starting point; none has been opened and confirmed. Custodians
+# reorganize portals, retire endpoints, and change licensing terms.
+#
+# The ingest layer MUST refuse to fetch a source with `verified: false`. Flip the flag only
+# after a human has opened the source and confirmed custodian, vintage, format, license, and
+# access path — and record who checked it and when in `verified_by` / `verified_on`.
+#
+# Tiers are defined in docs/EVIDENCE_STANDARDS.md:
+#   A = instrumented or authoritative   B = derived or secondary
+#   C = asserted, no open dataset       D = uncertain provenance (quarantine only)
+#
+# `confounds` is mandatory for any layer entering the correlation panel. An empty confound
+# list on an analysis layer is a configuration error, not a permissive default.
+
+schema_version: 1
+project: coincidence_app
+manifest_status: unverified_draft
+
+layers:
+
+  # ---------------------------------------------------------------- caves --
+
+  - id: nss_long_deep_caves
+    layer: caves
+    role: primary
+    name: NSS Long and Deep Cave Lists
+    custodian: National Speleological Society
+    url: https://caves.org/
+    tier: A
+    geometry: point
+    measures: [surveyed_length_km, surveyed_depth_m]
+    coverage: united_states
+    vintage: continuously_updated
+    license: unknown_check_before_use
+    verified: false
+    notes: >
+      Surveyed figures update as exploration proceeds; snapshots need a retrieval date.
+      Many entrance coordinates are deliberately withheld — see docs/ETHICS.md. Do not
+      geocode narrative descriptions to recover withheld locations.
+    confounds: [karst_extent, lava_tube_extent, exploration_effort]
+
+  - id: usgs_karst_extent
+    layer: caves
+    role: confound
+    name: Karst and potential karst areas of the conterminous United States
+    custodian: U.S. Geological Survey
+    reference: Weary & Doctor, USGS Open-File Report 2014-1156
+    url: https://pubs.usgs.gov/of/2014/1156/
+    tier: A
+    geometry: polygon
+    coverage: conterminous_united_states
+    license: public_domain_us_federal_check
+    verified: false
+    notes: >
+      The dominant confound for the entire cave layer. Cave density outside soluble bedrock
+      is near zero for reasons unrelated to anything else on the map.
+
+  - id: lava_tube_extent
+    layer: caves
+    role: confound
+    name: Volcanic and pseudokarst cave-forming terrain
+    custodian: various_national_surveys
+    url: null
+    tier: A
+    geometry: polygon
+    coverage: north_america
+    license: unknown
+    verified: false
+    notes: >
+      Separate physical mechanism from soluble karst; must remain a distinct layer.
+      Source not yet identified — likely assembled from national geologic maps.
+
+  - id: mexico_cave_systems
+    layer: caves
+    role: primary
+    name: Mexican cave systems (Yucatan cenote systems, Sistema Huautla)
+    custodian: unidentified
+    url: null
+    tier: A
+    geometry: point
+    coverage: mexico
+    license: unknown
+    verified: false
+    notes: >
+      Outside NSS coverage. Sac Actun, Ox Bel Ha, and Huautla need separate sourcing;
+      expect the least consistent metadata in the project.
+    confounds: [karst_extent, exploration_effort]
+
+  - id: canada_cave_systems
+    layer: caves
+    role: primary
+    name: Canadian cave systems (incl. Castleguard)
+    custodian: unidentified
+    url: null
+    tier: A
+    geometry: point
+    coverage: canada
+    license: unknown
+    verified: false
+    confounds: [karst_extent, exploration_effort]
+
+  # -------------------------------------------------------- tribal lands --
+
+  - id: census_aiannh
+    layer: tribal_lands
+    role: primary
+    name: TIGER/Line American Indian, Alaska Native, and Native Hawaiian Areas
+    custodian: U.S. Census Bureau
+    url: https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html
+    tier: A
+    geometry: polygon
+    coverage: united_states
+    vintage: annual
+    license: public_domain_us_federal_check
+    verified: false
+    notes: >
+      Workhorse layer. Includes reservations, off-reservation trust land, Oklahoma Tribal
+      Statistical Areas, and Alaska Native Village Statistical Areas — these are distinct
+      categories and must not be flattened into one symbology.
+    confounds: [federal_land_policy_history, population_density, terrain_ruggedness]
+
+  - id: bia_lar
+    layer: tribal_lands
+    role: primary
+    name: BIA Land Area Representations
+    custodian: Bureau of Indian Affairs
+    url: https://biamaps.geoplatform.gov/
+    tier: A
+    geometry: polygon
+    coverage: united_states
+    license: public_domain_us_federal_check
+    verified: false
+    notes: >
+      Better authority than TIGER on land status; TIGER is better on statistical geography.
+      Where they disagree, surface the disagreement rather than resolving it silently.
+    confounds: [federal_land_policy_history, population_density, terrain_ruggedness]
+
+  - id: canada_first_nations_reserves
+    layer: tribal_lands
+    role: primary
+    name: First Nations reserve boundaries
+    custodian: Statistics Canada / Crown-Indigenous Relations and Northern Affairs Canada
+    url: https://www.statcan.gc.ca/en/geography
+    tier: A
+    geometry: polygon
+    coverage: canada
+    license: open_government_licence_canada_check
+    verified: false
+    notes: Distinct legal category from US reservations; do not merge symbology without a note.
+    confounds: [population_density, terrain_ruggedness]
+
+  - id: mexico_indigenous_lands
+    layer: tribal_lands
+    role: primary
+    name: Comunidades indigenas and ejido lands
+    custodian: RAN / INEGI
+    url: null
+    tier: A
+    geometry: polygon
+    coverage: mexico
+    license: unknown
+    verified: false
+    notes: >
+      Boundary availability materially weaker than US/Canada. Where authoritative boundaries
+      do not exist, render no-data rather than approximating.
+    confounds: [population_density, terrain_ruggedness]
+
+  # ---------------------------------------------------- missing persons --
+
+  - id: namus
+    layer: missing_persons
+    sublayer: agency_baseline
+    role: primary
+    name: National Missing and Unidentified Persons System
+    custodian: National Institute of Justice
+    url: https://namus.nij.ojp.gov/
+    tier: A
+    geometry: point_aggregated
+    coverage: united_states
+    license: check_terms_of_use
+    verified: false
+    notes: >
+      Aggregates only. This project does not host or render individual case records — see
+      docs/ETHICS.md. No names on the map.
+    confounds: [population_density, visitation, reporting_regime, search_difficulty, case_status_dynamics]
+
+  - id: fbi_ncic_missing
+    layer: missing_persons
+    sublayer: agency_baseline
+    role: primary
+    name: NCIC Missing Person and Unidentified Person Statistics
+    custodian: Federal Bureau of Investigation
+    url: https://www.fbi.gov/
+    tier: A
+    geometry: tabular_by_jurisdiction
+    coverage: united_states
+    vintage: annual
+    license: public_domain_us_federal_check
+    verified: false
+    notes: >
+      Known to undercount for documented structural reasons. Auditable and undercounting
+      are both true and not in tension.
+    confounds: [population_density, reporting_regime, case_status_dynamics]
+
+  - id: nps_sar
+    layer: missing_persons
+    sublayer: agency_baseline
+    role: primary
+    name: National Park Service search-and-rescue and incident reporting
+    custodian: National Park Service
+    url: https://www.nps.gov/
+    tier: A
+    geometry: by_park_unit
+    coverage: us_park_units
+    license: public_domain_us_federal_check
+    verified: false
+    notes: >
+      One of the few contexts with an estimable denominator (visitor-days), enabling a rate
+      rather than a count.
+    confounds: [visitation, terrain_ruggedness, search_difficulty]
+
+  - id: uihi_mmiwg
+    layer: missing_persons
+    sublayer: mmiwg
+    role: primary
+    name: Missing and Murdered Indigenous Women and Girls (2018 report)
+    custodian: Urban Indian Health Institute
+    url: https://www.uihi.org/
+    tier: B
+    geometry: by_city
+    coverage: us_urban_areas
+    vintage: 2018
+    license: check_terms_of_use
+    verified: false
+    notes: >
+      Carried as its own labeled series. Its central finding is a reporting gap, which makes
+      it simultaneously a data layer and a confound on the layer it sits inside. Present as
+      a documented jurisdictional and reporting crisis — never as evidence for anything
+      paranormal.
+    confounds: [reporting_regime, jurisdictional_gap]
+
+  - id: rcmp_mmiw_overview
+    layer: missing_persons
+    sublayer: mmiwg
+    role: primary
+    name: National Operational Overview on Missing and Murdered Indigenous Women
+    custodian: Royal Canadian Mounted Police
+    url: https://www.rcmp-grc.gc.ca/
+    tier: B
+    coverage: canada
+    vintage: 2014
+    license: open_government_licence_canada_check
+    verified: false
+    confounds: [reporting_regime, jurisdictional_gap]
+
+  - id: canada_missing_persons_centre
+    layer: missing_persons
+    sublayer: agency_baseline
+    role: primary
+    name: Canadian Centre for Missing Persons and Unidentified Remains
+    custodian: Royal Canadian Mounted Police
+    url: https://www.canadasmissing.ca/
+    tier: A
+    coverage: canada
+    license: open_government_licence_canada_check
+    verified: false
+    notes: >
+      Separate reporting regime from the US, which is why the border is a discontinuity the
+      null model must represent rather than smooth across.
+    confounds: [population_density, reporting_regime, search_difficulty]
+
+  # --------------------------------------------------------- missing 411 --
+
+  - id: missing_411_clusters
+    layer: missing_persons
+    sublayer: asserted_clusters
+    role: primary
+    name: "Missing 411 cluster locations"
+    custodian: David Paulides (published books)
+    url: null
+    tier: C
+    geometry: polygon_approximate
+    coverage: north_america
+    license: transcription_of_published_assertion
+    verified: false
+    render:
+      fill: none
+      stroke: dashed
+      persistent_label: required
+      may_render_as_tier_a: false
+    notes: >
+      No open dataset, no published case list, no stated inclusion or exclusion criteria,
+      no denominator, no reproducible path from public records to the clusters as drawn.
+      Any geometry here is a transcription of an assertion and carries a page-level citation
+      to where the assertion appears.
+
+      Two structural consequences: (1) with no inclusion criteria there is no denominator,
+      so no rate can be computed and no conventional significance test applies — effect
+      sizes are descriptive only and the interface must say so at the point of display;
+      (2) because the selection process is unspecified, the possibility that it tracked the
+      confounds (rugged terrain, park land, low recovery probability) cannot be excluded
+      from the data alone.
+
+      Tier C is not dismissal. It is the tier at which a claim becomes testable rather than
+      pre-granted. See docs/EVIDENCE_STANDARDS.md.
+    confounds: [terrain_ruggedness, protected_area_extent, visitation, search_difficulty, karst_extent]
+
+  # ---------------------------------------------- base and confound stack --
+
+  - id: usgs_3dep
+    layer: terrain
+    role: confound
+    name: 3D Elevation Program
+    custodian: U.S. Geological Survey
+    url: https://www.usgs.gov/3d-elevation-program
+    tier: A
+    coverage: united_states
+    license: public_domain_us_federal_check
+    verified: false
+    derives: [terrain_ruggedness]
+
+  - id: nrcan_cdem
+    layer: terrain
+    role: confound
+    name: Canadian Digital Elevation Model
+    custodian: Natural Resources Canada
+    url: https://open.canada.ca/
+    tier: A
+    coverage: canada
+    license: open_government_licence_canada_check
+    verified: false
+    derives: [terrain_ruggedness]
+
+  - id: census_population
+    layer: population
+    role: confound
+    name: Decennial Census and American Community Survey population
+    custodian: U.S. Census Bureau
+    url: https://www.census.gov/
+    tier: A
+    coverage: united_states
+    license: public_domain_us_federal_check
+    verified: false
+    derives: [population_density]
+
+  - id: statcan_population
+    layer: population
+    role: confound
+    name: Census of Population
+    custodian: Statistics Canada
+    url: https://www.statcan.gc.ca/
+    tier: A
+    coverage: canada
+    license: open_government_licence_canada_check
+    verified: false
+    derives: [population_density]
+
+  - id: inegi_population
+    layer: population
+    role: confound
+    name: Censo de Poblacion y Vivienda
+    custodian: INEGI
+    url: https://www.inegi.org.mx/
+    tier: A
+    coverage: mexico
+    license: check_terms_of_use
+    verified: false
+    derives: [population_density]
+
+  - id: usgs_pad_us
+    layer: protected_areas
+    role: confound
+    name: Protected Areas Database of the United States
+    custodian: U.S. Geological Survey
+    url: https://www.usgs.gov/programs/gap-analysis-project/science/pad-us-data-overview
+    tier: A
+    coverage: united_states
+    license: public_domain_us_federal_check
+    verified: false
+    derives: [protected_area_extent]
+
+  - id: nps_visitation
+    layer: visitation
+    role: confound
+    name: NPS visitor use statistics
+    custodian: National Park Service
+    url: https://irma.nps.gov/STATS/
+    tier: A
+    coverage: us_park_units
+    license: public_domain_us_federal_check
+    verified: false
+    derives: [visitation]
+    notes: The denominator that turns missing-person counts into rates for park units.
+
+# Confounds referenced above that are derived rather than fetched. Each must resolve to a
+# raster on the analysis grid before the correlation panel will run.
+derived_confounds:
+  - id: terrain_ruggedness
+    from: [usgs_3dep, nrcan_cdem]
+    method: terrain_ruggedness_index
+  - id: search_difficulty
+    from: [terrain_ruggedness, land_cover, protected_area_extent]
+    method: composite_unspecified
+    status: not_yet_specified
+  - id: reporting_regime
+    from: [jurisdictional_boundaries]
+    method: categorical_by_policing_authority
+    status: not_yet_specified
+    notes: >
+      Tribal, BIA, federal, state, county, and provincial policing determine whether a case
+      enters a national database at all. Apparent spatial structure may map record-keeping
+      rather than events.
+  - id: exploration_effort
+    from: []
+    method: unspecified
+    status: not_yet_specified
+    notes: >
+      Surveyed length measures survey, not cave. No good proxy identified yet; caver-hours
+      are not published. This is an acknowledged gap in the cave null model.
+  - id: federal_land_policy_history
+    from: []
+    method: qualitative
+    status: documented_not_quantified
+    notes: >
+      Reservation locations are the residue of removal and allotment policy, which selected
+      for land considered marginal. Documented history, not a fetchable raster; stated in
+      the interface rather than modeled numerically.

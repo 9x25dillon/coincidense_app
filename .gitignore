@@ -1,0 +1,38 @@
+# Fetched source data — never committed. Reproduce from data/sources.yaml.
+data/cache/
+data/raw/
+data/interim/
+*.shp
+*.shx
+*.dbf
+*.prj
+*.gpkg
+*.tif
+*.tiff
+*.zip
+
+# Analysis outputs
+outputs/
+*.parquet
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Secrets
+.env
+.env.local
