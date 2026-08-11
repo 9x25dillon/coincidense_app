@@ -3,6 +3,13 @@
 Phases are ordered by dependency, not by calendar. Each phase states its deliverable and
 the condition under which it is done.
 
+**Where things actually stand:** the general engine (originally Phase 5) was pulled
+forward and built first. Phases 1–3 — verifying the North America sources, ingesting
+them, and rendering the map — are the remaining work. Building the analytical core
+before the case study turned out to be the right order: it forced the confound
+machinery to be general, and it surfaced four false-positive-generating defects on
+synthetic data where ground truth was known, rather than on real data where it isn't.
+
 ## Phase 0 — Specification (current)
 
 Cement the intent before writing ingest code, so the epistemic commitments are load-bearing
@@ -73,15 +80,26 @@ The actual product.
 the null specification, and a statement of what it does and does not license — and displays
 a failure to beat the null as prominently as a success.
 
-## Phase 5 — Generalization
+## Phase 5 — Generalization (built first)
 
-- [ ] User-supplied layers with declared confounds
-- [ ] Confound declaration as a required, validated step
-- [ ] Reproducible analysis export: manifest, parameters, results, in a re-runnable bundle
-- [ ] Documented worked examples beyond the original three layers
+- [x] User-supplied layers in CSV, TSV, JSON, JSON Lines, GeoJSON
+- [x] Coordinate auto-detection with explicit override; unparseable rows dropped and counted
+- [x] Equal-area projection chosen automatically from the data's extent
+- [x] Stratified surrogate nulls conditioned on user-declared confounds
+- [x] Monte Carlo co-location testing with effect size and interval
+- [x] Effect-size floor gating the verdict, not the p-value alone
+- [x] Sensitivity sweeps over grid resolution and bandwidth
+- [x] Tier propagation from ingest through to output
+- [x] Reproducible export bundle: inputs, provenance, parameters, null spec, seed
+- [x] Worked synthetic example where the confounded association demonstrably evaporates
+- [x] Test suite, including the project's central claim as an executable assertion
+- [ ] User-supplied study boundary, to replace the inferred convex-hull window
+- [ ] Areal support for polygons instead of collapsing them to representative points
+- [ ] Confound declaration enforced as a required step rather than a strong default
 
 **Done when:** someone can bring an unrelated claimed coincidence and get an honest answer
-without modifying the codebase.
+without modifying the codebase. *Substantially met* — the remaining items lower the
+noise floor and widen the geometry support rather than adding capability.
 
 ## Open questions
 

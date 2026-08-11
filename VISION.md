@@ -71,6 +71,31 @@ crime hotspots, bigfoot reports, cell towers — the analytical question is iden
 the machinery does not care about the subject matter. The deliverable is a tool that makes
 it *easy to do this right* and correspondingly awkward to do it wrong.
 
+**This last phase was built first.** The engine in `coincidence/` takes arbitrary CSV,
+JSON, JSON Lines, or GeoJSON and runs the full conditional-null pipeline on it today.
+Inverting the order was the right call twice over: it forced the confound machinery to
+be general rather than special-cased to caves and reservations, and it surfaced four
+false-positive-generating defects on synthetic data where the ground truth was known
+instead of on real data where it would have looked like a discovery. Those four are
+written up in `docs/METHODOLOGY.md`, because a project that accuses a genre of
+manufacturing spurious patterns should show its own near-misses.
+
+## Why give it away
+
+The instinct behind the tool is that pattern recognition is not the problem. Noticing is
+what people do, and noticing is often the beginning of something true. The problem is
+that noticing has no brakes, and the gap between "I see something" and "there is
+something" is where both credulity and contempt live.
+
+What a shared null model offers is a way to disagree precisely. An exported bundle
+carries its inputs, its confounds, its parameters, and its seed, so a second person can
+re-run it, swap the confound set, and show exactly where the first person went wrong —
+or fail to, and concede. That is a conversation. Trading screenshots of overlapping
+layers is not.
+
+The tool is most useful, then, not when it confirms something, and not when it refutes
+something, but when it gives two people who disagree a shared object to argue over.
+
 ## Design principles
 
 **Provenance is a type, not a footnote.** A dataset's evidentiary tier travels with it

@@ -107,6 +107,69 @@ beats it.
 - No causal language anywhere in the output surface. This pipeline measures spatial
   association. It cannot distinguish mechanism, and the interface must not imply otherwise.
 
+## What went wrong on the way here
+
+Four defects surfaced while building the engine, each of which would have produced
+confident false positives. They are recorded because they are the exact failures this
+project accuses the overlay-map genre of, and finding them in our own implementation is
+the strongest available argument that the discipline is necessary rather than decorative.
+
+**Double-smoothed nulls.** Surrogates were resampled from the already-smoothed raster
+and then smoothed again, while the observation was smoothed once. The null came out
+flatter than it should have been, and every effect size was inflated. Fixed by drawing
+surrogates from raw counts so both paths get exactly one smoothing pass.
+
+**A rectangular observation window.** The analysis grid is a rectangle; the region data
+actually occupies is not. For a projected lon/lat box, roughly three quarters of the
+grid was territory no observation could have come from. The null scattered surrogates
+into that void, making real data look concentrated together. Two independent layers came
+back at 1.23x, p = 0.01.
+
+**A window selected on the layers under test.** The first fix took the union of the two
+tested layers' occupied cells as the window. That is selection on the outcome: a cell
+enters the window because layer A is there *or* layer B is there, so within the window
+the two are positively associated by construction. It halved the artifact rather than
+removing it — independent layers still read 1.10x. Fixed by using the convex hull of all
+points, a coarse global boundary rather than a per-cell selection.
+
+**Uncorrected kernel truncation at the boundary.** A kernel centred near the window edge
+spills mass outside, and that mass was simply lost — depleting intensity near the edge
+identically for every layer, which correlates them all with each other for no reason but
+geometry. Fixed by dividing through by the smoothed window indicator, so each cell is
+rescaled by the fraction of its kernel that stayed inside.
+
+After all four, two independent layers read 1.02x — and that residual is why the noise
+floor exists.
+
+## The noise floor
+
+A result must show at least a 10% deviation from the null *and* p < 0.05 before the tool
+will call it anything.
+
+The p-value alone is not enough, and this is not a stylistic preference. Monte Carlo
+nulls tighten without bound as simulations increase, so with enough of them a 2%
+deviation registers as p < 0.01. Two percent is inside this method's own systematic
+error, because an inferred convex-hull window over-covers any concave study region.
+Reporting that as a finding would be precisely the failure this tool exists to prevent,
+merely dressed in a p-value.
+
+Supplying a real study boundary instead of an inferred one would lower the floor. Until
+then, honesty requires it.
+
+## Bandwidth is the question, not a parameter
+
+Kernel bandwidth sets the spatial scale at which co-location is being interrogated. Two
+layers coupled at 5 km read as 4.9x under a 25 km kernel and 1.1x under a 200 km kernel.
+
+Neither number is wrong. They are answers to different questions — "are these together
+at neighbourhood scale?" versus "are these together at regional scale?" — and a ratio
+reported without its bandwidth is not interpretable.
+
+This is why the sensitivity sweep covers bandwidth as well as cell size, and why the two
+sweeps carry different warnings. A conclusion that flips with *cell size* is a resolution
+artifact and should be discarded. A conclusion that changes with *bandwidth* is usually
+real information about the scale of the coupling, and should be reported as such.
+
 ## Known limitations to state up front
 
 - Ecological inference: area-level association does not transfer to individuals.
