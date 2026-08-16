@@ -781,6 +781,9 @@ class TestPromises(unittest.TestCase):
             found[name] = mods
         return found
 
+    @unittest.skipUnless(hasattr(sys, "stdlib_module_names"),
+                         "sys.stdlib_module_names is 3.10+; the check runs on the rest "
+                         "of the matrix")
     def test_the_package_imports_nothing_outside_the_standard_library(self):
         allowed = set(sys.stdlib_module_names) | {"coincidence", "__future__"}
         offenders = {
