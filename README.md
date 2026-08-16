@@ -8,7 +8,8 @@ A tool for testing whether apparent spatial coincidence survives contact with ba
 Bring any two located datasets and the things you think already explain where they occur.
 It answers one question: **does the overlap exceed what those confounds already predict?**
 
-Pure Python standard library. No install, no dependencies, no network, no build step.
+Pure Python standard library, 3.9 or newer. No install, no dependencies, no network,
+no build step.
 
 **[Start with the ten-minute tutorial →](https://9x25dillon.github.io/coincidense_app/)**
 
@@ -134,7 +135,7 @@ precisely, rather than trading screenshots.
 python3 -m unittest discover -s tests -v
 ```
 
-Every push runs them on Python 3.10 through 3.14, plus an end-to-end pass over the CLI:
+Every push runs them on Python 3.9 through 3.14, plus an end-to-end pass over the CLI:
 the worked example must still collapse, the report must still render with no external
 reference in it, and a malformed file must still fail cleanly.
 
