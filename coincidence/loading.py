@@ -71,7 +71,7 @@ def load_layer(
     if not records:
         raise LoadError(f"{path}: no records found")
 
-    points, weights, dropped = _extract(
+    points, weights, shapes, dropped = _extract(
         records, lat_field=lat_field, lon_field=lon_field, weight_field=weight_field,
         path=path,
     )
@@ -85,6 +85,7 @@ def load_layer(
         name=name or os.path.splitext(os.path.basename(path))[0],
         points=points,
         weights=weights,
+        shapes=shapes,
         tier=tier,
         custodian=custodian,
         source_path=path,
@@ -149,8 +150,52 @@ def _geojson_records(text: str) -> list[dict]:
             continue
         rec = dict(feat.get("properties") or {})
         rec["__lon__"], rec["__lat__"] = pos
+        # The representative point is kept for every feature, so extent, projection and
+        # the point path work unchanged. The rings are kept as well, so the areal path
+        # can use what the point throws away.
+        shape = _areal_rings(geom)
+        if shape:
+            rec["__shape__"] = shape
         out.append(rec)
     return out
+
+
+def _areal_rings(geom: dict) -> list | None:
+    """Polygon rings from a geometry, as [polygon][ring][(lon, lat)].
+
+    Only Polygon and MultiPolygon have area. A LineString encloses nothing, and closing
+    one into a region would invent extent the source never claimed.
+    """
+    gtype, coords = geom.get("type"), geom.get("coordinates")
+    if coords is None:
+        return None
+    if gtype == "Polygon":
+        polygons = [coords]
+    elif gtype == "MultiPolygon":
+        polygons = list(coords)
+    elif gtype == "GeometryCollection":
+        found = []
+        for sub in geom.get("geometries", []):
+            found.extend(_areal_rings(sub) or [])
+        return found or None
+    else:
+        return None
+
+    out = []
+    for poly in polygons:
+        rings = []
+        for ring in poly:
+            pts = []
+            for pos in _open_ring(ring):
+                try:
+                    pts.append((float(pos[0]), float(pos[1])))
+                except (TypeError, ValueError, IndexError):
+                    continue
+            if len(pts) >= 3:
+                rings.append(pts)
+        if rings:
+            out.append(rings)
+    return out or None
 
 
 def _representative_point(geom: dict) -> tuple[float, float] | None:
@@ -217,7 +262,7 @@ def _columns(records) -> str:
     """
     first = records[0]
     parts = []
-    for key in list(first.keys())[:12]:
+    for key in [k for k in first if not str(k).startswith("__")][:12]:
         sample = str(first.get(key, ""))
         if len(sample) > 18:
             sample = sample[:17] + "…"
@@ -258,7 +303,7 @@ def _extract(records, *, lat_field, lon_field, weight_field, path):
             f"{_columns(records)}"
         )
 
-    points, weights, dropped = [], [], 0
+    points, weights, shapes, dropped = [], [], [], 0
     for rec in records:
         lat, lon = _to_float(rec.get(lat_key)), _to_float(rec.get(lon_key))
         if lat is None or lon is None or not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
@@ -278,7 +323,8 @@ def _extract(records, *, lat_field, lon_field, weight_field, path):
             weight = w
         points.append((lon, lat))
         weights.append(weight)
-    return points, weights, dropped
+        shapes.append(rec.get("__shape__"))
+    return points, weights, (shapes if any(shapes) else None), dropped
 
 
 def _find_field(keys: list[str], candidates: tuple[str, ...]) -> str | None:

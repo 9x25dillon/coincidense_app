@@ -80,6 +80,7 @@ footer { margin-top: 74px; padding-top: 22px; border-top: 1px solid var(--line);
     <li><a href="#overlay">Ask the overlay question</a></li>
     <li><a href="#baserate">Ask the base-rate question</a></li>
     <li><a href="#report">Read the report</a></li>
+    <li><a href="#polygons">Polygons have size</a></li>
     <li><a href="#boundary">Declare your study region</a></li>
     <li><a href="#sensitivity">Check the parameters</a></li>
     <li><a href="#share">Share it</a></li>
@@ -219,7 +220,42 @@ why.</p>
   You do not have to take the number's word for it.</p>
 </div>
 
-<h2 id="boundary"><span class="n">6</span>Declare your study region</h2>
+<h2 id="polygons"><span class="n">6</span>Polygons have size</h2>
+
+<p>If your layers are boundaries rather than points — counties, watersheds, geology,
+land cover — each polygon is rasterized by the area it actually covers, cell by cell,
+with holes subtracted. Nothing to switch on.</p>
+
+<p>It matters more than it sounds. Here is one enormous western polygon and twenty-four
+tiny eastern ones, with a second layer scattered entirely inside the western one, so the
+truth is that they co-locate:</p>
+
+<table>
+  <tr><th>polygons read as</th><th>effect</th><th>verdict</th></tr>
+  <tr><td>one representative point each (<code>--no-areal</code>)</td>
+      <td class="num">0.17×</td><td>segregated — <strong>backwards</strong></td></tr>
+  <tr><td>the area they cover (default)</td>
+      <td class="num">3.00×</td><td>co-located — correct</td></tr>
+</table>
+
+<p>Twenty-four small centroids outvote one large one and the tool reports the opposite of
+the truth. Two readings are available, because they answer different questions:</p>
+
+<pre><code># extent (default): bigger features count for more — karst, land cover
+python3 -m coincidence test karst.geojson caves.csv --confound pop.csv
+
+# mass: each feature counts once however far it spreads — a county's population
+python3 -m coincidence test counties.geojson cases.csv \
+    --weight-a POP --areal-mode mass</code></pre>
+
+<div class="note">
+  <p>The intersection area is computed <strong>exactly</strong>, by clipping each polygon
+  to each cell — not estimated by scattering sample points. A tool whose job is deciding
+  whether a small residual is real has no business adding sampling noise of its own to
+  the measurement.</p>
+</div>
+
+<h2 id="boundary"><span class="n">7</span>Declare your study region</h2>
 
 <p>This is the highest-value flag in the tool, and on some geometries it is not optional.</p>
 
@@ -271,7 +307,7 @@ becomes reportable.</p>
   sample. That is the whole reason the boundary has to be declared.</p>
 </div>
 
-<h2 id="sensitivity"><span class="n">7</span>Check the parameters</h2>
+<h2 id="sensitivity"><span class="n">8</span>Check the parameters</h2>
 
 <p><code>--sensitivity</code> sweeps the two parameters that could otherwise decide your
 result on their own, holding the other fixed each time.</p>
@@ -295,7 +331,7 @@ result on their own, holding the other fixed each time.</p>
   interpretable.</li>
 </ul>
 
-<h2 id="share"><span class="n">8</span>Share it</h2>
+<h2 id="share"><span class="n">9</span>Share it</h2>
 
 <pre><code>python3 -m coincidence test a.csv b.csv --confound pop.csv --export finding.json</code></pre>
 

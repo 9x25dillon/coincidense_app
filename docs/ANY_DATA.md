@@ -33,9 +33,7 @@ Confound layers take weights too, which matters more than it sounds: a populatio
 confound is a set of place coordinates weighted by how many people live there, and
 unweighted it says only "somebody lives here".
 
-GeoJSON polygons collapse to the mean of their exterior ring. That is a real
-simplification — a whole county becomes one dot — and it is recorded rather than hidden.
-Areal support is roadmap work.
+GeoJSON polygons are rasterized by the area they actually cover — see below.
 
 Rows without usable coordinates are dropped and **counted**, never imputed. The count
 appears in the layer's provenance and in every exported bundle. Out-of-range values and
@@ -105,6 +103,47 @@ that is a different test depending on which one moves. The tool runs it both way
 reports the conservative answer, so the result cannot depend on the order you typed the
 files in. Both appear in the exported bundle. `--one-way` skips the second direction if
 you need the speed and accept the order-dependence.
+
+## Polygons have size
+
+A polygon contributes to every cell it touches, in proportion to how much of that cell it
+covers. The intersection area is computed exactly by clipping, not estimated by sampling
+points, because sampling would inject its own noise into a tool whose job is deciding
+whether a small residual is real.
+
+This is not a refinement. Here is one enormous western polygon and twenty-four tiny
+eastern ones, with a second layer scattered entirely inside the western one — so the
+truth is that they co-locate:
+
+| polygons read as | effect | verdict |
+|---|---|---|
+| one representative point each (`--no-areal`) | 0.17× | segregated — **backwards** |
+| the area they cover (default) | 3.00× | co-located — correct |
+
+Twenty-four small centroids outvote one large one, and the tool confidently reports the
+opposite of the truth. Any layer of administrative boundaries, land cover, geology or
+watersheds has that shape of problem in it.
+
+Two readings, because they answer different questions:
+
+```bash
+# extent (default): a cell gets the area covered, so bigger features count for more.
+# Right for karst, land cover, "how much of this place is X".
+python3 -m coincidence test karst.geojson caves.csv --confound pop.csv
+
+# mass: a feature's weight is divided across the cells it covers, so each feature
+# counts once however far it spreads. Right for a county's population.
+python3 -m coincidence test counties.geojson cases.csv --weight-a POP --areal-mode mass
+```
+
+Holes are holes — a lake inside a county is subtracted, not counted. MultiPolygons are
+taken as one feature. Long edges are subdivided before projection, because a four-vertex
+county drawn in longitude/latitude loses real area at its corners once projected into an
+equal-area plane. Point and polygon features can share a file; the points keep count
+semantics and the polygons get area, which puts two units on one grid — worth knowing,
+but that is the source's choice, not something this tool should silently resolve.
+
+`--no-areal` restores the old centroid behaviour, and says so in the output when it does.
 
 ## Declare your study region
 

@@ -80,7 +80,10 @@ statistics on a Mercator basemap are wrong by a factor that varies with latitude
 across an Alaska-to-Yucatán extent is not a rounding error.
 
 **2. Rasterize to a common grid.** Analysis operates on a fixed equal-area cell grid so
-that polygon layers, point layers, and continuous surfaces are commensurable. Cell size is
+that polygon layers, point layers, and continuous surfaces are commensurable. Polygons
+are rasterized by exact area of intersection with each cell rather than collapsed to a
+representative point: collapsing makes a reservation and a cave entrance the same object,
+and on a layer mixing one large feature with many small ones it can invert the result outright — measured at 0.17x against a true 3.00x. Cell size is
 a declared parameter and results are reported across several cell sizes, because the
 modifiable areal unit problem is not optional here — cluster findings that appear at one
 resolution and vanish at another are resolution artifacts and must be reported as such.
@@ -291,6 +294,9 @@ resolution artifacts — see the fifth entry above.
   concave study region. On a crescent this alone produces a 1.31x false positive, and
   no diagnostic computed from the points can tell you whether you are in that case.
   Supply the boundary.
+- Point and polygon features in one file put count units and area units on the same
+  grid. The tool does this rather than refusing, because it is the source's choice, but
+  the mixture is not meaningful unless you intended it.
 - Ecological inference: area-level association does not transfer to individuals.
 - Edge effects at the US–Canada and US–Mexico borders, where reporting regimes change
   discontinuously and datasets are not harmonized.
