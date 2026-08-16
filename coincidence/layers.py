@@ -28,6 +28,10 @@ class Layer:
     name: str
     points: list[tuple[float, float]] = field(default_factory=list)
     weights: list[float] = field(default_factory=list)
+    # Per feature, its polygon geometry in (lon, lat), or None where the feature is a
+    # point. Aligned with `points`, which keeps a representative coordinate for every
+    # feature either way so extent, projection and the point path all still work.
+    shapes: list | None = None
     tier: str = "D"
     custodian: str | None = None
     source_path: str | None = None
@@ -48,6 +52,25 @@ class Layer:
 
     def __len__(self) -> int:
         return len(self.points)
+
+    @property
+    def has_areas(self) -> bool:
+        return bool(self.shapes) and any(s for s in self.shapes)
+
+    def outline_points(self) -> list[tuple[float, float]]:
+        """Every vertex the layer occupies, for extent and window purposes.
+
+        A polygon's representative point says nothing about how far the polygon
+        reaches, so a grid or a hull built from centroids alone can be smaller than the
+        data it is supposed to contain.
+        """
+        if not self.has_areas:
+            return list(self.points)
+        out = list(self.points)
+        for shape in self.shapes or []:
+            if shape:
+                out.extend(v for polygon in shape for ring in polygon for v in ring)
+        return out
 
     @property
     def lons(self) -> list[float]:
@@ -72,6 +95,7 @@ class Layer:
             "source_path": self.source_path,
             "n_points": len(self.points),
             "total_weight": self.total_weight,
+            "n_areal_features": sum(1 for s in (self.shapes or []) if s),
             "declared_confounds": list(self.confounds),
             "dropped_rows": self.dropped_rows,
             "notes": self.notes,

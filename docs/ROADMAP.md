@@ -105,7 +105,8 @@ a failure to beat the null as prominently as a success.
       by self-adjointness, exactly rather than approximately
 - [x] User-supplied study boundary (`--boundary`), replacing the inferred convex-hull
       window, cutting the grid to the region, and lowering the noise floor 10% -> 4%
-- [ ] Areal support for polygons instead of collapsing them to representative points
+- [x] Areal support: polygons rasterized by exact area of intersection, holes
+      subtracted, in extent or mass mode
 - [ ] Confound declaration enforced as a required step rather than a strong default
 
 **Done when:** someone can bring an unrelated claimed coincidence and get an honest answer
@@ -116,9 +117,6 @@ noise floor and widen the geometry support rather than adding capability.
 
 Ordered by how much each changes what the tool can answer, not by effort.
 
-- [ ] **Areal support.** Polygons currently collapse to a representative point, so a
-      reservation and a cave entrance carry the same weight in the raster. Rasterizing
-      by area overlap would fix the largest remaining input distortion.
 - [ ] **Three or more layers.** The vision names triples; the engine is pairwise. The
       honest generalization is a partial statistic — does A×B survive conditioning on C
       *as a layer* rather than as a stratum — which is a different and more useful

@@ -82,6 +82,15 @@ def main(argv: list[str] | None = None) -> int:
                    help="evidence tier of layer A (default D, uncertain)")
     t.add_argument("--tier-b", default="D", choices=list("ABCD"),
                    help="evidence tier of layer B (default D, uncertain)")
+    t.add_argument("--no-areal", action="store_true",
+                   help="collapse polygons to one representative point each, as the "
+                        "tool did before areal support. Loses the size of every "
+                        "feature; occasionally what you want, rarely.")
+    t.add_argument("--areal-mode", choices=["extent", "mass"], default="extent",
+                   help="extent: a cell gets the area covered, so bigger features "
+                        "count for more (karst, land cover). mass: a feature's weight "
+                        "is divided across the cells it covers, so each feature counts "
+                        "once however far it spreads (population, counts).")
     t.add_argument("--boundary", metavar="PATH",
                    help="GeoJSON polygon of the real study region. Replaces the "
                         "inferred convex-hull window and lowers the noise floor from "
@@ -199,11 +208,12 @@ def _test(args) -> int:
     boundary = load_boundary(args.boundary) if args.boundary else None
 
     sigma_cells = (args.bandwidth_km / args.cell_km) if args.bandwidth_km else None
+    geometry = dict(areal=not args.no_areal, areal_mode=args.areal_mode)
     prep = prepare(a, b, confounds=confounds, cell_km=args.cell_km, n_bins=args.bins,
-                   sigma_cells=sigma_cells, boundary=boundary)
+                   sigma_cells=sigma_cells, boundary=boundary, **geometry)
 
     shared = dict(confounds=confounds, n_sim=args.sim, n_bins=args.bins, seed=args.seed,
-                  both_directions=not args.one_way, boundary=boundary)
+                  both_directions=not args.one_way, boundary=boundary, **geometry)
 
     quiet = args.json
     bar = Progress("simulating", enabled=False if quiet else None)
@@ -220,6 +230,8 @@ def _test(args) -> int:
             "bandwidth_km": result.bandwidth_km,
             "both_directions": not args.one_way,
             "boundary": boundary.describe() if boundary else None,
+            "areal": not args.no_areal,
+            "areal_mode": args.areal_mode,
         },
         "result": result.to_dict(),
     }
@@ -275,6 +287,11 @@ def _print_human(result, sens, style: Style) -> None:
              f"{r.strata['window_cells']} cells in the observation window "
              f"({source}, floor {r.noise_floor * 100:.0f}%)")
     print(f"  {style(shape, 'grey')}")
+    geom = r.geometry or {}
+    if geom.get("areal_mode"):
+        mode = geom["areal_mode"]
+        which = ", ".join(geom["areal_layers"])
+        print(f"  {style(f'polygons rasterized by area, {mode} mode: {which}', 'grey')}")
     print(rule(cols))
     print()
     print(f"  {style('●', colour)}  {style(label, 'bold', colour)}")

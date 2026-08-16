@@ -754,6 +754,147 @@ class TestPresentation(unittest.TestCase):
             self.assertTrue(colour)
 
 
+C_SHAPE = [(0, 0), (10, 0), (10, 3), (3, 3), (3, 7), (10, 7), (10, 10), (0, 10)]
+
+
+def _supersample(ring, x0, y0, x1, y1, n=300):
+    """Independent area estimate, for checking the exact method against something that
+    shares none of its assumptions."""
+    def inside(px, py):
+        c, m = False, len(ring)
+        for i in range(m):
+            ax, ay = ring[i]
+            bx, by = ring[(i + 1) % m]
+            if (ay > py) != (by > py):
+                if px < (bx - ax) * (py - ay) / (by - ay) + ax:
+                    c = not c
+        return c
+    hit = sum(
+        1 for i in range(n) for j in range(n)
+        if inside(x0 + (i + 0.5) * (x1 - x0) / n, y0 + (j + 0.5) * (y1 - y0) / n)
+    )
+    return hit / (n * n) * (x1 - x0) * (y1 - y0)
+
+
+class TestArealGeometry(unittest.TestCase):
+    """Polygon area, computed by clipping rather than sampling."""
+
+    def test_clipped_area_matches_an_independent_estimate_on_a_concave_shape(self):
+        """Sutherland-Hodgman emits degenerate corridors when a concave polygon is
+        clipped to a convex window. The claim this module rests on is that those
+        corridors carry no area, so the shoelace total is still exact. Checked here
+        rather than assumed."""
+        from coincidence.areal import clip_to_box, ring_area
+        for box in [(0, 0, 5, 5), (2, 2, 8, 8), (0, 0, 10, 10),
+                    (2.5, 2.5, 3.5, 7.5), (9, 1, 11, 9)]:
+            exact = ring_area(clip_to_box(C_SHAPE, *box))
+            self.assertAlmostEqual(exact, _supersample(C_SHAPE, *box), places=2,
+                                   msg=f"box {box}")
+
+    def test_whole_ring_area_is_analytic(self):
+        from coincidence.areal import ring_area
+        self.assertAlmostEqual(ring_area(C_SHAPE), 72.0)  # 10x10 less a 7x4 notch
+
+    def test_holes_are_subtracted_and_leave_no_coverage(self):
+        from coincidence.areal import shape_coverage
+        outer = [(0, 0), (10, 0), (10, 10), (0, 10)]
+        hole = [(3, 3), (7, 3), (7, 7), (3, 7)]
+        grid = Grid(0.0, 0.0, 1.0, 10, 10)
+        cover = shape_coverage([[outer, hole]], grid)
+        self.assertAlmostEqual(sum(cover.values()), 84.0, places=6)
+        self.assertAlmostEqual(cover.get(5 * 10 + 5, 0.0), 0.0, places=9)
+
+    def test_extent_mode_scales_with_size(self):
+        """A polygon twice the area contributes twice the total."""
+        from coincidence.areal import EXTENT, rasterize
+        grid = Grid(0.0, 0.0, 1.0, 12, 6)
+        small = [[[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]]]
+        big = [[[(6.0, 0.0), (10.0, 0.0), (10.0, 2.0), (6.0, 2.0)]]]
+        r = rasterize([small, big], [1.0, 1.0], grid, EXTENT)
+        left = sum(r[iy * 12 + ix] for iy in range(6) for ix in range(0, 4))
+        right = sum(r[iy * 12 + ix] for iy in range(6) for ix in range(6, 12))
+        self.assertAlmostEqual(right / left, 2.0, places=6)
+
+    def test_mass_mode_preserves_each_feature_total(self):
+        """However far it is spread, a feature contributes its weight and no more."""
+        from coincidence.areal import MASS, rasterize
+        grid = Grid(0.0, 0.0, 1.0, 12, 6)
+        small = [[[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]]]
+        big = [[[(6.0, 0.0), (10.0, 0.0), (10.0, 2.0), (6.0, 2.0)]]]
+        r = rasterize([small, big], [3.0, 5.0], grid, MASS)
+        self.assertAlmostEqual(sum(r), 8.0, places=6)
+
+    def test_geometry_nested_wrong_raises_instead_of_covering_nothing(self):
+        """One level of nesting out is easy to write and used to yield a silent zero."""
+        from coincidence.areal import EXTENT, rasterize
+        ring = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]
+        with self.assertRaises(ValueError) as caught:
+            rasterize([[ring]], [1.0], Grid(0.0, 0.0, 1.0, 4, 4), EXTENT)
+        self.assertIn("list of polygons", str(caught.exception))
+
+    def test_an_unknown_mode_is_refused(self):
+        from coincidence.areal import rasterize
+        with self.assertRaises(ValueError):
+            rasterize([], [], Grid(0.0, 0.0, 1.0, 2, 2), "sideways")
+
+
+class TestArealChangesTheAnswer(unittest.TestCase):
+    """Collapsing polygons to points is not a rounding error.
+
+    One enormous western polygon and twenty-four tiny eastern ones, with the second
+    layer scattered entirely inside the western one. The truth is that the two
+    co-locate. Read as points, the twenty-four eastern centroids outvote the single
+    western one and the tool reports the opposite.
+    """
+
+    def setUp(self):
+        rng = random.Random(11)
+
+        def box(cx, cy, w, h):
+            return [[(cx - w / 2, cy - h / 2), (cx + w / 2, cy - h / 2),
+                     (cx + w / 2, cy + h / 2), (cx - w / 2, cy + h / 2)]]
+
+        shapes = [[box(-115.0, 40.0, 9.0, 7.0)]]
+        points = [(-115.0, 40.0)]
+        for _ in range(24):
+            cx, cy = -85.0 + rng.uniform(-2, 2), 38.0 + rng.uniform(-2, 2)
+            shapes.append([box(cx, cy, 0.22, 0.22)])
+            points.append((cx, cy))
+
+        self.regions = Layer("regions", points, shapes=shapes, tier="A")
+        self.inside = Layer("inside", [(rng.uniform(-119, -111), rng.uniform(37, 43))
+                                       for _ in range(300)], tier="A")
+
+    def test_points_get_it_backwards_and_areas_get_it_right(self):
+        collapsed = test_pair(self.regions, self.inside, cell_km=50.0, n_sim=99,
+                              seed=1, areal=False)
+        areal = test_pair(self.regions, self.inside, cell_km=50.0, n_sim=99, seed=1)
+
+        self.assertLess(collapsed.effect_ratio, 0.5)   # reads as segregated
+        self.assertEqual(collapsed.verdict, "segregated")
+        self.assertGreater(areal.effect_ratio, 2.0)    # the truth
+        self.assertEqual(areal.verdict, "co-located")
+
+    def test_the_geometry_treatment_is_reported(self):
+        areal = test_pair(self.regions, self.inside, cell_km=50.0, n_sim=19, seed=1)
+        self.assertEqual(areal.geometry["areal_mode"], "extent")
+        self.assertIn("regions", areal.geometry["areal_layers"])
+        self.assertEqual(areal.to_dict()["geometry"]["areal_mode"], "extent")
+
+    def test_collapsing_polygons_is_warned_about(self):
+        collapsed = test_pair(self.regions, self.inside, cell_km=50.0, n_sim=19,
+                              seed=1, areal=False)
+        self.assertTrue(any("collapsed to one" in w for w in collapsed.warnings))
+        self.assertTrue(collapsed.geometry["collapsed_to_points"])
+
+    def test_the_grid_covers_the_polygons_not_just_their_centroids(self):
+        """A polygon reaching well beyond its representative point must still fit."""
+        from coincidence.analysis import prepare
+        prep = prepare(self.regions, self.inside, cell_km=50.0)
+        wide = prepare(self.regions, self.inside, cell_km=50.0, areal=False)
+        self.assertGreater(prep.grid.n_cells, wide.grid.n_cells)
+
+
 class TestPromises(unittest.TestCase):
     """The README's headline claims, as checks rather than assertions of good faith.
 

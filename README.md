@@ -103,6 +103,14 @@ finding. A UI that renders it as a failure would undo in styling what the engine
 the other fixed, which is a different test depending on which one moves. Both directions
 are run and the conservative one is reported.
 
+**Polygons have size.** A polygon is rasterized by the area it actually covers, cell by
+cell, with holes subtracted — not collapsed to a centroid. On a layer mixing one large
+feature with many small ones, collapsing does not blur the answer, it inverts it: a case
+whose true reading is 3.00× co-located comes back 0.17× *segregated*, because
+twenty-four small centroids outvote one large one. `--areal-mode` picks between extent
+(bigger features count for more — karst, land cover) and mass (each feature counts once
+however far it spreads — population).
+
 **The study region is yours to declare.** `--boundary region.geojson` replaces the
 inferred convex hull with the real thing. This matters more than it sounds — below are
 two layers scattered *independently* inside a crescent-shaped survey area, so the true
@@ -139,7 +147,7 @@ Every push runs them on Python 3.9 through 3.14, plus an end-to-end pass over th
 the worked example must still collapse, the report must still render with no external
 reference in it, and a malformed file must still fail cleanly.
 
-79 tests, including the executable form of the project's central claim: a confounded
+90 tests, including the executable form of the project's central claim: a confounded
 association must collapse when conditioned, a genuine one must survive, and two
 independent layers must come back as unrelated. Several were written after the
 implementation got those wrong — eight defects so far, each of which produced confident
@@ -166,6 +174,7 @@ and no missing person appears on a map by name. See [`docs/ETHICS.md`](docs/ETHI
 coincidence/                the engine
   loading.py                any format in — CSV, JSON, JSONL, GeoJSON
   boundary.py               declared study region: GeoJSON polygons, holes included
+  areal.py                  polygons rasterized by exact area of intersection
   projection.py             equal-area projection (Albers, cylindrical)
   grid.py                   analysis grid, kernel smoothing, observation window
   nulls.py                  stratified surrogate generation

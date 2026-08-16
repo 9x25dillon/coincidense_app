@@ -14,6 +14,7 @@ import math
 import random
 from dataclasses import dataclass, field
 
+from .areal import EXTENT, MODES, project_shapes, rasterize_layer
 from .boundary import Boundary, project_rings, rings_contain
 from .grid import (
     Grid, build_grid, default_sigma_cells, observation_window, project_layer, smooth,
@@ -126,6 +127,7 @@ class TestResult:
     nulls: list[NullDistribution] = field(default_factory=list, repr=False)
     noise_floor: float = NOISE_FLOOR
     window: dict = field(default_factory=dict)
+    geometry: dict = field(default_factory=dict)
 
     @property
     def null_values(self) -> list[float]:
@@ -237,6 +239,7 @@ class TestResult:
             "bandwidth_cells": self.sigma_cells,
             "noise_floor": self.noise_floor,
             "window": self.window,
+            "geometry": self.geometry,
             "evidence_tier": self.tier,
             "descriptive_only": self.descriptive_only,
             "statement": self.statement(),
@@ -294,6 +297,9 @@ class Prepared:
     # not len(layer) once observations outside the study region have been dropped.
     n_a: int = 0
     n_b: int = 0
+    outlines: list = field(default_factory=list)
+    # The areal mode in force, or None when every feature entered as a point.
+    areal_mode: str | None = None
 
     @property
     def noise_floor(self) -> float:
@@ -323,6 +329,15 @@ class Prepared:
         if mean <= 0.0:
             return 0.0
         return sum(1 for v in vals if v < 0.10 * mean) / len(vals)
+
+    def geometry_describe(self) -> dict:
+        areal_layers = [l.name for l in [self.a, self.b] + list(self.confounds)
+                        if l.has_areas]
+        return {
+            "areal_mode": self.areal_mode,
+            "areal_layers": areal_layers,
+            "collapsed_to_points": bool(areal_layers) and self.areal_mode is None,
+        }
 
     def window_describe(self) -> dict:
         return {
@@ -360,6 +375,8 @@ def prepare(
     sigma_cells: float | None = None,
     projection=None,
     boundary: Boundary | None = None,
+    areal: bool = True,
+    areal_mode: str = EXTENT,
 ) -> Prepared:
     """Project, rasterize, smooth, window, and stratify. No randomness here.
 
@@ -380,6 +397,8 @@ def prepare(
     shape to the surface, and a city just over the line genuinely does inform the
     intensity at the edge.
     """
+    if areal_mode not in MODES:
+        raise ValueError(f"unknown areal mode {areal_mode!r}; expected one of {MODES}")
     confounds = list(confounds or [])
     all_layers = [a, b] + confounds
 
@@ -393,6 +412,16 @@ def prepare(
 
     projected = [project_layer(l, projection) for l in all_layers]
     weights = [list(l.weights) for l in all_layers]
+    shapes = [project_shapes(l.shapes, projection) if (areal and l.has_areas) else None
+              for l in all_layers]
+    # Extent and the inferred window follow the ground the layers actually cover. Built
+    # from representative points alone, a grid can be smaller than the polygons it is
+    # meant to hold.
+    outlines = [
+        [projection.forward(lon, lat) for lon, lat in l.outline_points()]
+        if (areal and l.has_areas) else pts
+        for l, pts in zip(all_layers, projected)
+    ]
 
     rings = project_rings(boundary, projection) if boundary is not None else None
     outside: dict[str, int] = {}
@@ -406,6 +435,10 @@ def prepare(
                 outside[all_layers[k].name] = dropped
             projected[k] = [projected[k][j] for j in keep]
             weights[k] = [weights[k][j] for j in keep]
+            if shapes[k] is not None:
+                shapes[k] = [shapes[k][j] for j in keep]
+            outlines[k] = [outlines[k][j] for j in keep] if not (
+                areal and all_layers[k].has_areas) else outlines[k]
         if not projected[0] or not projected[1]:
             empty = a.name if not projected[0] else b.name
             raise ValueError(
@@ -415,9 +448,10 @@ def prepare(
             )
         grid = build_grid([[p for ring in rings for p in ring]], cell_km)
     else:
-        grid = build_grid(projected, cell_km)
+        grid = build_grid(outlines, cell_km)
 
-    rasters = [grid.rasterize(xy, w) for xy, w in zip(projected, weights)]
+    rasters = [rasterize_layer(xy, sh, w, grid, areal_mode)
+               for xy, sh, w in zip(projected, shapes, weights)]
     sigma = (
         sigma_cells if sigma_cells is not None
         else default_sigma_cells(min(len(projected[0]), len(projected[1])))
@@ -431,7 +465,7 @@ def prepare(
                 f"cell at {cell_km:g} km resolution. Use a smaller --cell-km."
             )
     else:
-        window = observation_window(projected, grid, dilate_cells=1)
+        window = observation_window(outlines, grid, dilate_cells=1)
 
     # Edge correction. A Gaussian kernel centred near the window boundary spills part
     # of its mass outside and that mass is simply lost, so intensity is systematically
@@ -456,6 +490,8 @@ def prepare(
         confound_intensity=confound_intensity, strata=strata, projected=projected,
         boundary=boundary, boundary_rings=rings, outside_boundary=outside,
         n_a=len(projected[0]), n_b=len(projected[1]),
+        outlines=outlines,
+        areal_mode=(areal_mode if any(sh for sh in shapes) else None),
     )
 
 
@@ -530,6 +566,8 @@ def test_pair(
     progress=None,
     prep: Prepared | None = None,
     boundary: Boundary | None = None,
+    areal: bool = True,
+    areal_mode: str = EXTENT,
 ) -> TestResult:
     """Test co-location of two layers against a confound-conditioned null.
 
@@ -548,7 +586,7 @@ def test_pair(
     if prep is None:
         prep = prepare(a, b, confounds=confounds, cell_km=cell_km, n_bins=n_bins,
                        sigma_cells=sigma_cells, projection=projection,
-                       boundary=boundary)
+                       boundary=boundary, areal=areal, areal_mode=areal_mode)
 
     observed = colocation(prep.intensity_a, prep.intensity_b, prep.window)
 
@@ -575,6 +613,14 @@ def test_pair(
     strata = prep.strata
 
     warnings = []
+    if prep.geometry_describe()["collapsed_to_points"]:
+        which = ", ".join(prep.geometry_describe()["areal_layers"])
+        warnings.append(
+            f"Areal support is off, so polygons in {which} were collapsed to one "
+            f"representative point each. A feature the size of a county then counts for "
+            f"exactly as much as a single site, and counts for it in one cell. Drop "
+            f"--no-areal unless you specifically want the point reading."
+        )
     if prep.boundary is None:
         empty = prep.window_emptiness()
         if empty > SPARSE_WINDOW_LIMIT:
@@ -645,6 +691,7 @@ def test_pair(
         tier=tier, descriptive_only=descriptive_only, sigma_cells=prep.sigma,
         warnings=warnings, nulls=nulls,
         noise_floor=prep.noise_floor, window=prep.window_describe(),
+        geometry=prep.geometry_describe(),
     )
 
 
