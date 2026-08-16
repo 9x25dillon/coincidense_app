@@ -517,6 +517,155 @@ class TestSensitivitySweepsIsolateOneThing(unittest.TestCase):
                          [50.0, 100.0, 200.0])
 
 
+def _crescent_ring(n=72):
+    """A deliberately concave study region. Its convex hull covers roughly twice the
+    area, which is the geometry the inferred window handles worst."""
+    ring = []
+    for k in range(n + 1):
+        t = math.radians(-140 + k * (280 / n))
+        ring.append((-100 + 6.0 * math.cos(t), 40 + 4.0 * math.sin(t)))
+    for k in range(n + 1):
+        t = math.radians(140 - k * (280 / n))
+        ring.append((-100 + 3.4 * math.cos(t), 40 + 2.3 * math.sin(t)))
+    return ring
+
+
+class TestDeclaredBoundary(unittest.TestCase):
+    """A supplied study boundary replaces the inferred convex hull.
+
+    This is not a convenience. On a concave region the hull is not approximately right,
+    it is wrong in a way that manufactures findings.
+    """
+
+    def setUp(self):
+        from coincidence.boundary import Boundary, rings_contain
+        self.ring = _crescent_ring()
+        self.boundary = Boundary(rings=[self.ring], source="crescent")
+        rng = random.Random(4242)
+
+        def inside(n):
+            out = []
+            while len(out) < n:
+                p = (rng.uniform(-107.0, -93.0), rng.uniform(34.0, 46.0))
+                if rings_contain([self.ring], *p):
+                    out.append(p)
+            return out
+
+        self.x = Layer("x", inside(350), tier="A")
+        self.y = Layer("y", inside(350), tier="A")
+
+    def test_the_hull_manufactures_a_finding_the_boundary_removes(self):
+        """Regression test for a false-positive generator, and the reason --boundary
+        exists. Two layers scattered independently inside a crescent read as strongly
+        associated under the inferred hull, because the hull's null scatters surrogates
+        across the empty middle. The measured effect is ~1.3x — three times the noise
+        floor that is supposed to suppress exactly this."""
+        hull = test_pair(self.x, self.y, cell_km=40.0, n_sim=99, seed=3)
+        bounded = test_pair(self.x, self.y, cell_km=40.0, n_sim=99, seed=3,
+                            boundary=self.boundary)
+
+        self.assertGreater(hull.effect_ratio, 1.20)
+        self.assertTrue(hull.beats_null)          # the false positive
+        self.assertLess(abs(bounded.effect_ratio - 1.0), 0.04)
+        self.assertFalse(bounded.beats_null)      # corrected
+
+    def test_the_window_shrinks_to_the_declared_region(self):
+        hull = test_pair(self.x, self.y, cell_km=40.0, n_sim=19, seed=3)
+        bounded = test_pair(self.x, self.y, cell_km=40.0, n_sim=19, seed=3,
+                            boundary=self.boundary)
+        self.assertLess(bounded.strata["window_cells"], hull.strata["window_cells"] * 0.75)
+        self.assertTrue(bounded.window["declared"])
+        self.assertFalse(hull.window["declared"])
+
+    def test_declaring_a_boundary_lowers_the_noise_floor(self):
+        from coincidence.analysis import BOUNDED_NOISE_FLOOR, NOISE_FLOOR
+        hull = test_pair(self.x, self.y, cell_km=40.0, n_sim=19, seed=3)
+        bounded = test_pair(self.x, self.y, cell_km=40.0, n_sim=19, seed=3,
+                            boundary=self.boundary)
+        self.assertEqual(hull.noise_floor, NOISE_FLOOR)
+        self.assertEqual(bounded.noise_floor, BOUNDED_NOISE_FLOOR)
+        self.assertLess(BOUNDED_NOISE_FLOOR, NOISE_FLOOR)
+
+    def test_a_concave_inferred_window_is_warned_about(self):
+        """The floor does not catch this case, so the tool has to say so out loud."""
+        hull = test_pair(self.x, self.y, cell_km=40.0, n_sim=19, seed=3)
+        self.assertTrue(any("--boundary" in w for w in hull.warnings))
+
+    def test_a_convex_extent_is_not_warned_about(self):
+        rng = random.Random(11)
+        box = lambda n: [(rng.uniform(-105.0, -95.0), rng.uniform(36.0, 44.0))
+                         for _ in range(n)]
+        r = test_pair(Layer("p", box(300), tier="A"), Layer("q", box(300), tier="A"),
+                      cell_km=40.0, n_sim=19, seed=3)
+        self.assertFalse(any("--boundary" in w for w in r.warnings))
+
+    def test_observations_outside_the_boundary_are_dropped_and_reported(self):
+        """Keeping them would let an outside point smooth into the window and raise the
+        observed statistic while contributing nothing to the null."""
+        stray = Layer("x", self.x.points + [(-130.0, 55.0), (-131.0, 56.0)], tier="A")
+        r = test_pair(stray, self.y, cell_km=40.0, n_sim=19, seed=3,
+                      boundary=self.boundary)
+        self.assertEqual(r.window["points_outside"], {"x": 2})
+        self.assertTrue(any("outside the declared boundary" in w for w in r.warnings))
+
+    def test_a_boundary_missing_the_data_is_an_error_not_a_silent_zero(self):
+        from coincidence.boundary import Boundary
+        far = Boundary(rings=[[(10.0, 10.0), (11.0, 10.0), (11.0, 11.0), (10.0, 11.0)]],
+                       source="elsewhere")
+        with self.assertRaises(ValueError):
+            test_pair(self.x, self.y, cell_km=40.0, n_sim=9, boundary=far)
+
+
+class TestBoundaryLoading(unittest.TestCase):
+    def _geojson(self, geometry) -> str:
+        return _tmp("bnd.geojson", json.dumps(geometry))
+
+    def test_feature_collection_polygon(self):
+        from coincidence.boundary import load_boundary
+        ring = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
+        path = self._geojson({"type": "FeatureCollection", "features": [
+            {"type": "Feature", "properties": {},
+             "geometry": {"type": "Polygon", "coordinates": [ring]}}]})
+        b = load_boundary(path)
+        self.assertEqual(len(b), 1)
+        self.assertEqual(b.n_vertices, 4)  # closing vertex dropped
+
+    def test_multipolygon_and_bare_geometry(self):
+        from coincidence.boundary import load_boundary
+        sq = lambda x: [[x, 0.0], [x + 1, 0.0], [x + 1, 1.0], [x, 1.0], [x, 0.0]]
+        self.assertEqual(len(load_boundary(self._geojson(
+            {"type": "MultiPolygon", "coordinates": [[sq(0.0)], [sq(5.0)]]}))), 2)
+        self.assertEqual(len(load_boundary(self._geojson(
+            {"type": "Polygon", "coordinates": [sq(0.0)]}))), 1)
+
+    def test_holes_are_holes(self):
+        from coincidence.boundary import load_boundary, rings_contain
+        outer = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]
+        hole = [[4.0, 4.0], [6.0, 4.0], [6.0, 6.0], [4.0, 6.0], [4.0, 4.0]]
+        b = load_boundary(self._geojson(
+            {"type": "Polygon", "coordinates": [outer, hole]}))
+        self.assertTrue(rings_contain(b.rings, 1.0, 1.0))
+        self.assertFalse(rings_contain(b.rings, 5.0, 5.0))   # in the hole
+        self.assertFalse(rings_contain(b.rings, 20.0, 20.0))  # outside entirely
+
+    def test_a_line_is_not_a_study_region(self):
+        from coincidence.boundary import BoundaryError, load_boundary
+        with self.assertRaises(BoundaryError):
+            load_boundary(self._geojson(
+                {"type": "LineString", "coordinates": [[0.0, 0.0], [1.0, 1.0]]}))
+
+    def test_long_edges_are_densified_before_projection(self):
+        from coincidence.boundary import densify
+        ring = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+        self.assertGreater(len(densify(ring, max_deg=0.25)), 100)
+        self.assertEqual(len(densify(ring, max_deg=0.0)), 4)
+
+    def test_a_non_geojson_boundary_is_refused_clearly(self):
+        from coincidence.boundary import BoundaryError, load_boundary
+        with self.assertRaises(BoundaryError):
+            load_boundary(_tmp("b.csv", "lon,lat\n0,0\n"))
+
+
 class TestPresentation(unittest.TestCase):
     """The display must not be able to argue for a conclusion the numbers have not
     earned — but it does have to be readable."""
@@ -624,6 +773,35 @@ class TestCommandLine(unittest.TestCase):
             saved = json.load(fh)
         self.assertIn("statement", saved["result"])
         self.assertIn("uniform", out.lower())  # no confounds: it must say so
+
+    def test_boundary_flag_end_to_end(self):
+        ring = [[list(p) for p in _crescent_ring(24)]]
+        ring[0].append(ring[0][0])
+        bnd = _tmp("area.geojson", json.dumps(
+            {"type": "Feature", "properties": {},
+             "geometry": {"type": "Polygon", "coordinates": ring}}))
+        rng = random.Random(9)
+        from coincidence.boundary import rings_contain
+        poly = [tuple(p) for p in ring[0]]
+        pts = []
+        while len(pts) < 120:
+            p = (rng.uniform(-107.0, -93.0), rng.uniform(34.0, 46.0))
+            if rings_contain([poly], *p):
+                pts.append(p)
+        rows = "lon,lat\n" + "\n".join(f"{x},{y}" for x, y in pts)
+        code, out = self._run(["test", _tmp("a.csv", rows), _tmp("b.csv", rows),
+                               "--boundary", bnd, "--cell-km", "40", "--sim", "19",
+                               "--no-color"])
+        self.assertEqual(code, 0)
+        self.assertIn("declared boundary", out)
+        self.assertIn("floor 4%", out)
+
+    def test_a_bad_boundary_file_fails_cleanly(self):
+        code, out = self._run(["test", _tmp("a.csv", "lon,lat\n-100,40\n-101,41\n"),
+                               _tmp("b.csv", "lon,lat\n-100,40\n-101,41\n"),
+                               "--boundary", _tmp("b.geojson", "{}"), "--sim", "9"])
+        self.assertEqual(code, 2)
+        self.assertIn("Polygon", out)
 
     def test_json_output_is_parseable(self):
         rows = "lon,lat\n" + "\n".join(

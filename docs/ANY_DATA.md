@@ -83,7 +83,8 @@ each other, which is as real a finding as clustering.
 
 **The p-value is not the answer.** Monte Carlo nulls tighten as simulations increase, so
 with enough of them a 2% deviation shows p < 0.01. The engine therefore requires an
-effect of at least 10% *and* p < 0.05 before it will call anything a result. Below that
+effect of at least 10% *and* p < 0.05 before it will call anything a result — 4% once you
+declare a study boundary with `--boundary`. Below that
 it says so explicitly, because a small p on a trivial effect is a property of the
 simulation count, not evidence.
 
@@ -104,6 +105,47 @@ that is a different test depending on which one moves. The tool runs it both way
 reports the conservative answer, so the result cannot depend on the order you typed the
 files in. Both appear in the exported bundle. `--one-way` skips the second direction if
 you need the speed and accept the order-dependence.
+
+## Declare your study region
+
+```bash
+python3 -m coincidence test a.csv b.csv --confound pop.csv --boundary watershed.geojson
+```
+
+A GeoJSON Polygon or MultiPolygon, holes included, describing where an observation could
+have occurred at all — a watershed, a county, a survey extent, a park, a coastline-clipped
+land area. Several polygons in one file are fine; they are taken together.
+
+**This is the highest-value flag in the tool, and on some geometries it is not optional.**
+Without it the window is the convex hull of your points. For a roughly convex study area
+that is close enough. For a concave one it is not close at all: measured on a crescent,
+two layers scattered *independently* inside it come back at **1.31×** — a confident false
+positive at three times the 10% floor built to suppress exactly that. With the real
+boundary declared, the same data reads **1.005×**.
+
+| window | mean effect on independent layers | worst deviation |
+|---|---|---|
+| inferred convex hull | 1.307× | 33.4% |
+| declared boundary | 1.005× | 1.9% |
+
+Coastlines, valley floors, river corridors, mountain arcs and anything with a lake in it
+are all that shape. The tool measures how much of an inferred window is reached by no
+observation at all and warns above 5%, but the warning is a prompt to supply the
+boundary, not a substitute for it.
+
+Three things change when you declare one:
+
+- **The noise floor drops from 10% to 4%**, because the hull over-coverage that the
+  higher floor was paying for is gone. A 5% effect becomes reportable.
+- **The grid is cut to the boundary** rather than to the data, so a confound file
+  covering half a continent no longer drags the analysis extent out with it.
+- **Observations outside the region are dropped and counted.** The null can only draw
+  surrogates from inside the window, so an outside point left in place would smooth into
+  the window and inflate the observed statistic while contributing nothing to the null.
+  A point outside your study region is either a bad coordinate or evidence the boundary
+  is wrong, and the tool tells you how many there were rather than absorbing them.
+  Confounds are exempt — they never contribute mass to the null, only shape to the
+  surface, and a city just over the line genuinely does inform the intensity at the edge.
 
 ## Seeing it
 
@@ -154,11 +196,11 @@ someone can argue with precisely, instead of trading screenshots.
 
 ## Known limitations
 
-**The observation window is inferred.** Absent a real study boundary, the engine uses the
-convex hull of your points. A hull over-covers any concave region — a coastline, a
-mountain range, a river corridor — which leaves a few percent of unexplained association
-that belongs to geometry rather than data. That is where the 10% noise floor comes from.
-Supplying a true boundary would lower it, and that is roadmap work.
+**The observation window is inferred unless you declare one.** Absent `--boundary`, the
+engine uses the convex hull of your points, which over-covers any concave region. On a
+mildly concave extent that costs a few percent, which is where the 10% floor comes from.
+On a strongly concave one — a crescent, a coastline, a river corridor — it costs 31%, and
+the floor does not save you. Declare the boundary.
 
 **Polygons become points.** See above.
 

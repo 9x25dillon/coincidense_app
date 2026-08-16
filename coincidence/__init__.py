@@ -19,6 +19,7 @@ Pure standard library. No install, no build step, no network.
 from .analysis import (
     NullDistribution, Prepared, TestResult, colocation, prepare, sensitivity, test_pair,
 )
+from .boundary import Boundary, BoundaryError, load_boundary
 from .grid import Grid, build_grid, smooth
 from .layers import TIERS, Layer
 from .loading import LoadError, load_layer
@@ -31,6 +32,7 @@ __all__ = [
     "Layer", "TIERS", "load_layer", "LoadError",
     "test_pair", "sensitivity", "colocation", "TestResult", "NullDistribution",
     "prepare", "Prepared",
+    "Boundary", "BoundaryError", "load_boundary",
     "Grid", "build_grid", "smooth",
     "build_strata", "surrogate",
     "Albers", "CylindricalEqualArea", "auto_projection",

@@ -14,8 +14,10 @@ import math
 import random
 from dataclasses import dataclass, field
 
+from .boundary import Boundary, project_rings, rings_contain
 from .grid import (
     Grid, build_grid, default_sigma_cells, observation_window, project_layer, smooth,
+    window_from_rings,
 )
 from .layers import Layer, lowest_tier
 from .nulls import Strata, build_strata, stratum_totals, surrogate_dot
@@ -25,13 +27,26 @@ from .projection import auto_projection
 # Minimum deviation from 1.0 that counts as a real effect. Below this the result is
 # inside the method's own systematic error — chiefly the inferred observation window,
 # which over-covers any concave study region and leaves a few percent of association
-# that belongs to the geometry rather than the data. Supplying a true study boundary
-# lowers this floor; until then, honesty requires it.
+# that belongs to the geometry rather than the data.
 NOISE_FLOOR = 0.10
+
+# The floor when the caller declares a real study boundary instead. The dominant term
+# in the 10% figure is the convex hull over-covering a concave region; remove the hull
+# and that term goes with it. What remains is Monte Carlo scatter and the cell-centre
+# rule at the boundary edge, measured at well under 2% on independent layers in a
+# deliberately awkward concave region — see the boundary tests. Four percent is that
+# residual with room to spare, and it is the difference between a 1.05x finding being
+# reportable and being unreportable.
+BOUNDED_NOISE_FLOOR = 0.04
 
 # Below this, a cell's kernel is so far outside the window that dividing by the
 # retained fraction would turn rounding error into a hotspot.
 EDGE_FLOOR = 0.05
+
+# How empty an inferred window may be before it is reported as the wrong shape.
+# Measured: convex extents run 0%, a crescent runs 9-10% and produces a 1.31x false
+# positive. Five percent separates them with room on both sides.
+CONCAVE_WINDOW_LIMIT = 0.05
 
 
 def colocation(a: list[float], b: list[float], mask: list[bool] | None = None) -> float:
@@ -111,6 +126,8 @@ class TestResult:
     sigma_cells: float = 0.0
     warnings: list[str] = field(default_factory=list)
     nulls: list[NullDistribution] = field(default_factory=list, repr=False)
+    noise_floor: float = NOISE_FLOOR
+    window: dict = field(default_factory=dict)
 
     @property
     def null_values(self) -> list[float]:
@@ -134,7 +151,7 @@ class TestResult:
         Reporting that as a finding would be exactly the failure this tool exists to
         prevent, just dressed in a p-value.
         """
-        return self.p_value < 0.05 and abs(self.effect_ratio - 1.0) >= NOISE_FLOOR
+        return self.p_value < 0.05 and abs(self.effect_ratio - 1.0) >= self.noise_floor
 
     @property
     def verdict(self) -> str:
@@ -158,13 +175,15 @@ class TestResult:
                 + " fixed"
             )
 
-        if self.p_value < 0.05 and abs(self.effect_ratio - 1.0) < NOISE_FLOOR:
+        if self.p_value < 0.05 and abs(self.effect_ratio - 1.0) < self.noise_floor:
             return (
                 f"{self.layer_a} and {self.layer_b} differ from the null by only "
                 f"{abs(self.effect_ratio - 1.0) * 100:.1f}% (p = {self.p_value:.4f}) "
                 f"{basis}. The deviation is statistically detectable but smaller than "
-                f"this method's noise floor of {NOISE_FLOOR * 100:.0f}%, which comes "
-                f"from inferring the observation window rather than being given one. "
+                f"this method's noise floor of {self.noise_floor * 100:.0f}%"
+                + (", which comes from inferring the observation window rather than "
+                   "being given one. " if not self.window.get("declared")
+                   else ", the residual left by the analysis geometry itself. ") +
                 f"Read this as no association. A small p-value on a tiny effect is a "
                 f"property of running many simulations, not evidence of anything."
             )
@@ -218,6 +237,8 @@ class TestResult:
             "grid": self.grid,
             "bandwidth_km": self.bandwidth_km,
             "bandwidth_cells": self.sigma_cells,
+            "noise_floor": self.noise_floor,
+            "window": self.window,
             "evidence_tier": self.tier,
             "descriptive_only": self.descriptive_only,
             "statement": self.statement(),
@@ -268,6 +289,50 @@ class Prepared:
     confound_intensity: dict[str, list[float]]
     strata: Strata
     projected: list[list[tuple[float, float]]]
+    boundary: Boundary | None = None
+    boundary_rings: list[list[tuple[float, float]]] | None = None
+    outside_boundary: dict[str, int] = field(default_factory=dict)
+    # Counts AFTER any boundary filtering — what the statistic actually saw, which is
+    # not len(layer) once observations outside the study region have been dropped.
+    n_a: int = 0
+    n_b: int = 0
+
+    @property
+    def noise_floor(self) -> float:
+        return BOUNDED_NOISE_FLOOR if self.boundary is not None else NOISE_FLOOR
+
+    def window_emptiness(self) -> float:
+        """Fraction of the window carrying essentially none of the combined intensity.
+
+        A diagnostic for the failure the noise floor does NOT catch. The floor was
+        calibrated on a roughly convex extent, where the inferred hull is close to the
+        truth. On a genuinely concave region it is not close at all: on a crescent, two
+        independent layers read 1.31x under the hull — a confident false positive three
+        times the size of the floor meant to suppress it.
+
+        The signature of that case is a hull enclosing large tracts no observation
+        reaches. Measured here, the same crescent runs 9-10% empty while convex extents
+        run 0%, so the emptiness of the window is a usable warning that the window is
+        the wrong shape and a real boundary is needed rather than optional.
+        """
+        total = [x + y for x, y in zip(self.intensity_a, self.intensity_b)]
+        vals = [v for v, inside in zip(total, self.window) if inside]
+        if not vals:
+            return 0.0
+        mean = sum(vals) / len(vals)
+        if mean <= 0.0:
+            return 0.0
+        return sum(1 for v in vals if v < 0.10 * mean) / len(vals)
+
+    def window_describe(self) -> dict:
+        return {
+            "declared": self.boundary is not None,
+            "source": self.boundary.source if self.boundary else "convex hull of the data",
+            "cells": self.window_cells,
+            "grid_cells": self.grid.n_cells,
+            "noise_floor": self.noise_floor,
+            "points_outside": dict(self.outside_boundary),
+        }
 
     def intensity(self, raw: list[float]) -> list[float]:
         """Raw counts to edge-corrected kernel intensity: the one smoothing pass every
@@ -294,23 +359,79 @@ def prepare(
     n_bins: int = 5,
     sigma_cells: float | None = None,
     projection=None,
+    boundary: Boundary | None = None,
 ) -> Prepared:
-    """Project, rasterize, smooth, window, and stratify. No randomness here."""
+    """Project, rasterize, smooth, window, and stratify. No randomness here.
+
+    With a `boundary`, the declared study region replaces the inferred convex hull as
+    the observation window, and two things follow from that.
+
+    The grid is cut to the boundary rather than to the data, so a confound file
+    covering half a continent no longer drags the analysis extent out with it.
+
+    And observations of the two tested layers that fall outside the declared region are
+    dropped, with a count kept. This is not tidying. The surrogate mass is drawn from
+    inside the window only, so leaving an outside observation in place would let it
+    smooth into the window and contribute to the observed statistic while contributing
+    nothing to the null — comparing a quantity computed one way against a quantity
+    computed another. A point outside the study region is either a coordinate error or
+    evidence the boundary is wrong, and both deserve to be surfaced rather than
+    absorbed. Confounds are left alone: they never contribute mass to the null, only
+    shape to the surface, and a city just over the line genuinely does inform the
+    intensity at the edge.
+    """
     confounds = list(confounds or [])
     all_layers = [a, b] + confounds
 
     if projection is None:
         lons = [p[0] for l in all_layers for p in l.points]
         lats = [p[1] for l in all_layers for p in l.points]
+        if boundary is not None:
+            lons += [x for ring in boundary.rings for x, _ in ring]
+            lats += [y for ring in boundary.rings for _, y in ring]
         projection = auto_projection(lons, lats)
 
     projected = [project_layer(l, projection) for l in all_layers]
-    grid = build_grid(projected, cell_km)
+    weights = [list(l.weights) for l in all_layers]
 
-    rasters = [grid.rasterize(xy, l.weights) for xy, l in zip(projected, all_layers)]
-    sigma = sigma_cells if sigma_cells is not None else default_sigma_cells(min(len(a), len(b)))
+    rings = project_rings(boundary, projection) if boundary is not None else None
+    outside: dict[str, int] = {}
+    if rings is not None:
+        for k in (0, 1):
+            keep = [
+                j for j, (x, y) in enumerate(projected[k]) if rings_contain(rings, x, y)
+            ]
+            dropped = len(projected[k]) - len(keep)
+            if dropped:
+                outside[all_layers[k].name] = dropped
+            projected[k] = [projected[k][j] for j in keep]
+            weights[k] = [weights[k][j] for j in keep]
+        if not projected[0] or not projected[1]:
+            empty = a.name if not projected[0] else b.name
+            raise ValueError(
+                f"no observations of {empty!r} fall inside the declared boundary "
+                f"({boundary.source}). Check that the boundary covers the study area "
+                f"and that both are in longitude/latitude."
+            )
+        grid = build_grid([[p for ring in rings for p in ring]], cell_km)
+    else:
+        grid = build_grid(projected, cell_km)
 
-    window = observation_window(projected, grid, dilate_cells=1)
+    rasters = [grid.rasterize(xy, w) for xy, w in zip(projected, weights)]
+    sigma = (
+        sigma_cells if sigma_cells is not None
+        else default_sigma_cells(min(len(projected[0]), len(projected[1])))
+    )
+
+    if rings is not None:
+        window = window_from_rings(rings, grid)
+        if not any(window):
+            raise ValueError(
+                f"the declared boundary ({boundary.source}) contains no whole grid "
+                f"cell at {cell_km:g} km resolution. Use a smaller --cell-km."
+            )
+    else:
+        window = observation_window(projected, grid, dilate_cells=1)
 
     # Edge correction. A Gaussian kernel centred near the window boundary spills part
     # of its mass outside and that mass is simply lost, so intensity is systematically
@@ -333,6 +454,8 @@ def prepare(
         window=window, window_cells=sum(1 for w in window if w), recip_edge=recip,
         raster_a=rasters[0], raster_b=rasters[1], intensity_a=ia, intensity_b=ib,
         confound_intensity=confound_intensity, strata=strata, projected=projected,
+        boundary=boundary, boundary_rings=rings, outside_boundary=outside,
+        n_a=len(projected[0]), n_b=len(projected[1]),
     )
 
 
@@ -406,6 +529,7 @@ def test_pair(
     both_directions: bool = True,
     progress=None,
     prep: Prepared | None = None,
+    boundary: Boundary | None = None,
 ) -> TestResult:
     """Test co-location of two layers against a confound-conditioned null.
 
@@ -423,7 +547,8 @@ def test_pair(
     """
     if prep is None:
         prep = prepare(a, b, confounds=confounds, cell_km=cell_km, n_bins=n_bins,
-                       sigma_cells=sigma_cells, projection=projection)
+                       sigma_cells=sigma_cells, projection=projection,
+                       boundary=boundary)
 
     observed = colocation(prep.intensity_a, prep.intensity_b, prep.window)
 
@@ -450,6 +575,26 @@ def test_pair(
     strata = prep.strata
 
     warnings = []
+    if prep.boundary is None:
+        empty = prep.window_emptiness()
+        if empty > CONCAVE_WINDOW_LIMIT:
+            warnings.append(
+                f"The inferred convex-hull window is {empty * 100:.0f}% empty — large "
+                f"tracts inside it are reached by no observation, which means the study "
+                f"region is concave and the hull is the wrong shape for it. This is the "
+                f"one case the noise floor does NOT protect you from: on a crescent-"
+                f"shaped region, two layers known to be independent read 1.31x. Supply "
+                f"the real study region with --boundary before believing this number."
+            )
+    if prep.outside_boundary:
+        detail = ", ".join(f"{n} from {name}" for name, n in prep.outside_boundary.items())
+        warnings.append(
+            f"Observations fell outside the declared boundary and were dropped "
+            f"({detail}). Either the coordinates are wrong or the boundary is, and "
+            f"which one it is changes the answer. The null can only draw surrogates "
+            f"from inside the study region, so keeping them would compare an observed "
+            f"statistic against a null computed over different ground."
+        )
     if strata.is_uniform:
         warnings.append(
             "No confounds declared. This is a uniform null and is uninformative — "
@@ -474,7 +619,7 @@ def test_pair(
         )
     if len(nulls) > 1:
         verdicts = {
-            (n.p_value < 0.05 and abs(n.effect_ratio - 1.0) >= NOISE_FLOOR,
+            (n.p_value < 0.05 and abs(n.effect_ratio - 1.0) >= prep.noise_floor,
              n.effect_ratio > 1.0)
             for n in nulls
         }
@@ -498,6 +643,7 @@ def test_pair(
         grid=prep.grid.describe(), strata=strata.describe(),
         tier=tier, descriptive_only=descriptive_only, sigma_cells=prep.sigma,
         warnings=warnings, nulls=nulls,
+        noise_floor=prep.noise_floor, window=prep.window_describe(),
     )
 
 

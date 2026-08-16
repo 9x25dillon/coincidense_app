@@ -11,7 +11,7 @@ rather than against the North America case study. Phases 1–2, verifying and in
 the case-study sources, are the remaining work.
 
 Building the analytical core before the case study turned out to be the right order: it
-forced the confound machinery to be general, and it surfaced six false-positive- or
+forced the confound machinery to be general, and it surfaced seven false-positive- or
 false-dismissal-generating defects on synthetic data where ground truth was known,
 rather than on real data where it isn't.
 
@@ -103,7 +103,8 @@ a failure to beat the null as prominently as a success.
 - [x] Per-layer column and weight overrides; weighted confounds
 - [x] Interactive-speed nulls — the smoothing is hoisted out of the simulation loop
       by self-adjointness, exactly rather than approximately
-- [ ] User-supplied study boundary, to replace the inferred convex-hull window
+- [x] User-supplied study boundary (`--boundary`), replacing the inferred convex-hull
+      window, cutting the grid to the region, and lowering the noise floor 10% -> 4%
 - [ ] Areal support for polygons instead of collapsing them to representative points
 - [ ] Confound declaration enforced as a required step rather than a strong default
 
@@ -115,10 +116,6 @@ noise floor and widen the geometry support rather than adding capability.
 
 Ordered by how much each changes what the tool can answer, not by effort.
 
-- [ ] **A real study boundary** (`--boundary region.geojson`). The single highest-value
-      item: it is what the 10% noise floor is paying for. A supplied polygon replaces
-      the convex hull, and the floor can then be derived from the geometry instead of
-      assumed. Everything else on this list is worth less than this one.
 - [ ] **Areal support.** Polygons currently collapse to a representative point, so a
       reservation and a cave entrance carry the same weight in the raster. Rasterizing
       by area overlap would fix the largest remaining input distortion.

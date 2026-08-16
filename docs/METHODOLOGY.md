@@ -70,6 +70,11 @@ correlation panel — that is a configuration error, not a permissive default.
 
 ## Analytical pipeline
 
+**0. Declare the study region.** `--boundary region.geojson` — the polygon
+observations could have come from. Absent one the engine infers a convex hull, which is
+adequate for a convex extent and actively wrong for a concave one. See the seventh
+defect below.
+
 **1. Normalize.** Reproject all layers to Albers Equal Area Conic (NAD83). Area-based
 statistics on a Mercator basemap are wrong by a factor that varies with latitude, which
 across an Alaska-to-Yucatán extent is not a rounding error.
@@ -181,10 +186,59 @@ verdict, that disagreement is raised as a warning rather than resolved silently,
 a result that hinges on which layer is held fixed is usually telling you the two layers
 are resolved at different granularities, not that they are associated.
 
+## The observation window, and the seventh defect
+
+**The noise floor does not protect a concave study region.** This is the most serious
+thing found so far and it invalidated an assumption the previous five entries were
+written under.
+
+The 10% floor was calibrated against synthetic data on a roughly convex extent, where
+the convex hull is close to the truth and the residual is a couple of percent. On a
+genuinely concave region it is not close to the truth at all. Measured on a crescent —
+two layers scattered *independently* inside it, 350 points each, eight trials — the
+inferred hull returns a mean effect of **1.31x, worst trial 1.33x**. That is a confident
+false positive at three times the floor built to suppress it, on data with no
+relationship whatsoever, and every earlier statement that the floor bounds the window
+error was true only for the convex case.
+
+The mechanism is the same one as the second defect, which was fixed but only halfway.
+A hull over a crescent encloses the empty middle, the null scatters surrogates through
+territory no observation could occupy, and both real layers look concentrated together
+by comparison. Crescents are not exotic: a coastline, a valley floor, a mountain arc, a
+river corridor, a county with a lake in it.
+
+Declaring the true region with `--boundary` removes it. The same eight trials return a
+mean of **1.005x, worst deviation 1.85%**:
+
+| window | mean effect | mean deviation | worst |
+|---|---|---|---|
+| inferred convex hull | 1.307x | 30.7% | 33.4% |
+| declared boundary | 1.005x | 0.6% | 1.9% |
+
+So there are two floors. **10%** when the window is inferred, unchanged. **4%** when a
+boundary is declared — roughly twice the worst residual measured above, which is what is
+left once the hull term is gone: Monte Carlo scatter and the cell-centre rule at the
+edge.
+
+Because the floor cannot catch the concave case, the tool now detects it instead. It
+measures what fraction of the inferred window is reached by no observation at all —
+0% on convex extents, 9-10% on the crescent — and warns above 5% that the window is the
+wrong shape and a real boundary is needed rather than optional.
+
+Two consequences follow from declaring a boundary, both deliberate. The analysis grid is
+cut to the boundary rather than to the data, so a confound file covering half a continent
+no longer drags the extent out with it. And observations of the tested layers falling
+outside the declared region are dropped with a count kept and reported, because the null
+draws surrogate mass only from inside the window: an outside point left in place would
+smooth into the window and raise the observed statistic while contributing nothing to the
+null, comparing two quantities computed over different ground. Confounds are exempt —
+they never contribute mass to the null, only shape to the surface, and a city just over
+the line genuinely does inform the intensity at the edge.
+
 ## The noise floor
 
 A result must show at least a 10% deviation from the null *and* p < 0.05 before the tool
-will call it anything.
+will call it anything — 4% when a study boundary has been declared.
 
 The p-value alone is not enough, and this is not a stylistic preference. Monte Carlo
 nulls tighten without bound as simulations increase, so with enough of them a 2%
@@ -193,8 +247,9 @@ error, because an inferred convex-hull window over-covers any concave study regi
 Reporting that as a finding would be precisely the failure this tool exists to prevent,
 merely dressed in a p-value.
 
-Supplying a real study boundary instead of an inferred one would lower the floor. Until
-then, honesty requires it.
+Supplying a real study boundary with `--boundary` lowers the floor to 4% and, on a
+concave region, is the difference between a correct answer and a manufactured one. See
+the section above.
 
 ## Bandwidth is the question, not a parameter
 
@@ -216,6 +271,9 @@ resolution artifacts — see the fifth entry above.
 
 ## Known limitations to state up front
 
+- Without `--boundary`, the observation window is a convex hull, which over-covers any
+  concave study region. On a crescent this alone produces a 1.31x false positive. The
+  tool warns when it detects the signature, but the fix is to supply the boundary.
 - Ecological inference: area-level association does not transfer to individuals.
 - Edge effects at the US–Canada and US–Mexico borders, where reporting regimes change
   discontinuously and datasets are not harmonized.

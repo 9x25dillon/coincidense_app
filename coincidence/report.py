@@ -24,7 +24,7 @@ import json
 import struct
 import zlib
 
-from .analysis import NOISE_FLOOR, Prepared, TestResult
+from .analysis import Prepared, TestResult
 from .grid import convex_hull
 
 # Ramp stops, light to dark. Each layer keeps its own hue everywhere it appears so the
@@ -111,31 +111,39 @@ def raster_png(values: list[float], prep: Prepared, ramp: str) -> str:
     return "data:image/png;base64," + base64.b64encode(_png(grid.nx, grid.ny, rows)).decode()
 
 
-def _hull_points(prep: Prepared) -> str:
-    """The observation window boundary, in image coordinates."""
-    pts = [p for layer in prep.projected for p in layer]
-    hull = convex_hull(pts)
-    if len(hull) < 3:
-        return ""
+def _window_rings(prep: Prepared) -> list[list[tuple[float, float]]]:
+    """The window outline in projected metres — the declared boundary when there is
+    one, the inferred hull otherwise. Drawing the hull over a declared boundary would
+    show the reader a window the analysis did not use."""
+    if prep.boundary_rings:
+        return prep.boundary_rings
+    hull = convex_hull([p for layer in prep.projected for p in layer])
+    return [hull] if len(hull) >= 3 else []
+
+
+def _outline(prep: Prepared) -> str:
     grid = prep.grid
-    out = []
-    for x, y in hull:
-        cx = (x - grid.x_min) / grid.cell_m
-        cy = grid.ny - (y - grid.y_min) / grid.cell_m
-        out.append(f"{cx:.2f},{cy:.2f}")
-    return " ".join(out)
+    declared = bool(prep.boundary_rings)
+    dash = "" if declared else ' stroke-dasharray="2 1.6"'
+    parts = []
+    for ring in _window_rings(prep):
+        pts = " ".join(
+            f"{(x - grid.x_min) / grid.cell_m:.2f},"
+            f"{grid.ny - (y - grid.y_min) / grid.cell_m:.2f}"
+            for x, y in ring
+        )
+        parts.append(
+            f'<polygon points="{pts}" fill="none" stroke="{OUTLINE}" '
+            f'stroke-opacity="{0.9 if declared else 0.8}" stroke-width="0.7"{dash}/>'
+        )
+    return "".join(parts)
 
 
 def map_panel(title: str, subtitle: str, values: list[float], prep: Prepared,
               ramp: str) -> str:
     grid = prep.grid
     href = raster_png(values, prep, ramp)
-    hull = _hull_points(prep)
-    outline = (
-        f'<polygon points="{hull}" fill="none" stroke="{OUTLINE}" '
-        f'stroke-opacity="0.8" stroke-width="0.7" stroke-dasharray="2 1.6"/>'
-        if hull else ""
-    )
+    outline = _outline(prep)
     return f"""
 <figure class="map">
   <svg viewBox="0 0 {grid.nx} {grid.ny}" role="img" aria-label="{html.escape(title)}">
@@ -261,9 +269,9 @@ def render(result: TestResult, prep: Prepared, bundle: dict) -> str:
     basis = ", ".join(confounds) if confounds else "NOTHING — uniform null"
 
     maps = [
-        map_panel(result.layer_a, f"{len(prep.a)} observations, kernel intensity",
+        map_panel(result.layer_a, f"{prep.n_a} observations, kernel intensity",
                   prep.intensity_a, prep, "a"),
-        map_panel(result.layer_b, f"{len(prep.b)} observations, kernel intensity",
+        map_panel(result.layer_b, f"{prep.n_b} observations, kernel intensity",
                   prep.intensity_b, prep, "b"),
         map_panel(f"{result.layer_a} under the null",
                   "one draw from the conditional null", prep.surrogate_surface(seed=1),
@@ -336,9 +344,32 @@ def render(result: TestResult, prep: Prepared, bundle: dict) -> str:
         "which layer was given first."
     )
 
+    win = result.window
+    outline_note = (
+        "solid, because it was declared" if win.get("declared")
+        else "dashed, because it was inferred from a convex hull"
+    )
+    if win.get("declared"):
+        window_row = f"declared: {html.escape(str(win.get('source')))}"
+        window_note = (
+            "The observation window was declared rather than inferred, so the "
+            f"noise floor is {result.noise_floor * 100:.0f}% — the residual left by the "
+            "analysis geometry itself, without the convex-hull over-coverage the "
+            "inferred window carries."
+        )
+    else:
+        window_row = "inferred: convex hull of the data"
+        window_note = (
+            "The observation window is inferred from a convex hull, which over-covers "
+            f"concave study regions — that is where the {result.noise_floor * 100:.0f}% "
+            "noise floor comes from. Supplying --boundary lowers it."
+        )
+
     params = bundle["parameters"]
     spec = _rows([
         ("Confounds held fixed", html.escape(basis)),
+        ("Observation window", window_row),
+        ("Noise floor", f"{result.noise_floor * 100:.0f}% minimum reportable effect"),
         ("Strata", f"{result.strata['n_strata']} "
                    f"({result.strata['bins_per_confound']} bins per confound)"),
         ("Window", f"{result.strata['window_cells']} cells of "
@@ -384,7 +415,7 @@ def render(result: TestResult, prep: Prepared, bundle: dict) -> str:
     resampling {html.escape(directions[0]['resampled_layer'])} within the confound
     strata. The shaded band holds 95% of them. The line is what was actually observed.
     A result matters when the line sits clear of the bars — and the effect has to clear
-    {NOISE_FLOOR * 100:.0f}% as well, because a Monte Carlo p-value shrinks with the
+    {result.noise_floor * 100:.0f}% as well, because a Monte Carlo p-value shrinks with the
     simulation count whether or not anything is there.</p>
     {null_chart(result)}
     <table class="grid-table narrow">
@@ -397,9 +428,9 @@ def render(result: TestResult, prep: Prepared, bundle: dict) -> str:
   <section>
     <h2>The surfaces the test ran on</h2>
     <p class="note">One pixel per analysis cell, at the resolution the statistic used.
-    The dashed outline is the observation window; nothing outside it is analysed or
-    drawn. Colour is scaled to the 99th percentile of occupied cells in each panel, so
-    panels show shape rather than comparable absolute magnitudes.</p>
+    The outline is the observation window — {outline_note} — and nothing outside it is
+    analysed or drawn. Colour is scaled to the 99th percentile of occupied cells in each
+    panel, so panels show shape rather than comparable absolute magnitudes.</p>
     <div class="maps">{''.join(maps)}</div>
   </section>
 
@@ -425,9 +456,8 @@ def render(result: TestResult, prep: Prepared, bundle: dict) -> str:
   <footer>
     <p><strong>What this does not license.</strong> This is spatial association, not
     mechanism. It cannot distinguish cause, direction, or the individuals involved, and
-    an unmeasured confound remains the most common explanation for any residual. The
-    observation window is inferred from a convex hull, which over-covers concave study
-    regions — that is where the {NOISE_FLOOR * 100:.0f}% noise floor comes from.</p>
+    an unmeasured confound remains the most common explanation for any residual.
+    {html.escape(window_note)}</p>
     <p class="repro">Generated by coincidence {html.escape(bundle['version'])}. Seed
     {params['seed']}. Re-run it, change the confound set, and disagree precisely.</p>
   </footer>

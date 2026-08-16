@@ -102,6 +102,14 @@ finding. A UI that renders it as a failure would undo in styling what the engine
 the other fixed, which is a different test depending on which one moves. Both directions
 are run and the conservative one is reported.
 
+**The study region is yours to declare.** `--boundary region.geojson` replaces the
+inferred convex hull with the real thing. This matters more than it sounds: on a
+crescent-shaped region, two layers scattered *independently* read **1.31x** under the
+inferred hull — a confident false positive at three times the noise floor meant to
+suppress it. With the boundary declared they read 1.005x. Coastlines, valley floors and
+river corridors are all that shape, so the tool now detects the signature and says so.
+Declaring a boundary also lowers the floor from 10% to 4%.
+
 **Provenance is a type.** Every layer carries an evidence tier through ingest, analysis,
 and output. Data loads as *uncertain* until you assert otherwise — see
 [`docs/EVIDENCE_STANDARDS.md`](docs/EVIDENCE_STANDARDS.md).
@@ -116,10 +124,10 @@ precisely, rather than trading screenshots.
 python3 -m unittest discover -s tests -v
 ```
 
-60 tests, including the executable form of the project's central claim: a confounded
+75 tests, including the executable form of the project's central claim: a confounded
 association must collapse when conditioned, a genuine one must survive, and two
 independent layers must come back as unrelated. Several were written after the
-implementation got those wrong — six defects so far, each of which produced confident
+implementation got those wrong — seven defects so far, each of which produced confident
 false positives or false dismissals, all written up in
 [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md#what-went-wrong-on-the-way-here) rather than
 quietly fixed.
@@ -141,6 +149,7 @@ and no missing person appears on a map by name. See [`docs/ETHICS.md`](docs/ETHI
 ```
 coincidence/                the engine
   loading.py                any format in — CSV, JSON, JSONL, GeoJSON
+  boundary.py               declared study region: GeoJSON polygons, holes included
   projection.py             equal-area projection (Albers, cylindrical)
   grid.py                   analysis grid, kernel smoothing, observation window
   nulls.py                  stratified surrogate generation

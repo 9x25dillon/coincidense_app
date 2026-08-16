@@ -19,6 +19,7 @@ import sys
 
 from . import __version__
 from .analysis import prepare, sensitivity, test_pair
+from .boundary import BoundaryError, load_boundary
 from .console import Progress, Style, null_plot, rule, width, wrap
 from .layers import TIERS
 from .loading import LoadError, load_layer
@@ -81,6 +82,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="evidence tier of layer A (default D, uncertain)")
     t.add_argument("--tier-b", default="D", choices=list("ABCD"),
                    help="evidence tier of layer B (default D, uncertain)")
+    t.add_argument("--boundary", metavar="PATH",
+                   help="GeoJSON polygon of the real study region. Replaces the "
+                        "inferred convex-hull window and lowers the noise floor from "
+                        "10%% to 4%%, because the hull's over-coverage of concave "
+                        "regions is what the higher floor pays for.")
     t.add_argument("--cell-km", type=float, default=50.0, help="analysis cell size")
     t.add_argument("--bandwidth-km", type=float, default=None,
                    help="kernel bandwidth in km (default: a stated rule from sample size)")
@@ -104,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "describe":
             return _describe(args)
         return _test(args)
-    except LoadError as exc:
+    except (LoadError, BoundaryError, ValueError) as exc:
         style = Style(False if getattr(args, "no_color", False) else None, sys.stderr)
         print(style("\n  Could not load that file.", "bold", "red"), file=sys.stderr)
         message = str(exc)
@@ -190,12 +196,14 @@ def _test(args) -> int:
     a.confounds = [c.name for c in confounds]
     b.confounds = [c.name for c in confounds]
 
+    boundary = load_boundary(args.boundary) if args.boundary else None
+
     sigma_cells = (args.bandwidth_km / args.cell_km) if args.bandwidth_km else None
     prep = prepare(a, b, confounds=confounds, cell_km=args.cell_km, n_bins=args.bins,
-                   sigma_cells=sigma_cells)
+                   sigma_cells=sigma_cells, boundary=boundary)
 
     shared = dict(confounds=confounds, n_sim=args.sim, n_bins=args.bins, seed=args.seed,
-                  both_directions=not args.one_way)
+                  both_directions=not args.one_way, boundary=boundary)
 
     quiet = args.json
     bar = Progress("simulating", enabled=False if quiet else None)
@@ -211,6 +219,7 @@ def _test(args) -> int:
             "bins_per_confound": args.bins, "seed": args.seed,
             "bandwidth_km": result.bandwidth_km,
             "both_directions": not args.one_way,
+            "boundary": boundary.describe() if boundary else None,
         },
         "result": result.to_dict(),
     }
@@ -261,8 +270,10 @@ def _print_human(result, sens, style: Style) -> None:
 
     print()
     print(f"  {style(r.layer_a, 'bold')} {style('×', 'grey')} {style(r.layer_b, 'bold')}")
+    source = "declared boundary" if r.window.get("declared") else "inferred hull"
     shape = (f"{r.grid['cell_km']:g} km cells · {r.bandwidth_km:.0f} km kernel · "
-             f"{r.strata['window_cells']} cells in the observation window")
+             f"{r.strata['window_cells']} cells in the observation window "
+             f"({source}, floor {r.noise_floor * 100:.0f}%)")
     print(f"  {style(shape, 'grey')}")
     print(rule(cols))
     print()
