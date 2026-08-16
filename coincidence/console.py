@@ -31,11 +31,14 @@ class Style:
     def __init__(self, enabled: bool | None = None, stream=None):
         stream = stream or sys.stdout
         if enabled is None:
-            enabled = (
-                stream.isatty()
-                and os.environ.get("NO_COLOR") is None
-                and os.environ.get("TERM") != "dumb"
-            )
+            if os.environ.get("NO_COLOR") is not None:
+                enabled = False
+            elif os.environ.get("FORCE_COLOR"):
+                # Honoured so colour survives a pipe — `| less -R`, a CI log, or the
+                # capture that produces the screenshots in the docs.
+                enabled = True
+            else:
+                enabled = stream.isatty() and os.environ.get("TERM") != "dumb"
         self.enabled = enabled
 
     def __call__(self, text: str, *names: str) -> str:
@@ -161,6 +164,8 @@ class Progress:
     def __init__(self, label: str, enabled: bool | None = None):
         self.label = label
         self.enabled = sys.stderr.isatty() if enabled is None else enabled
+        if self.enabled and os.environ.get("NO_PROGRESS"):
+            self.enabled = False  # keeps captured output free of progress residue
         self._last = -1
 
     def __call__(self, done: int, total: int) -> None:

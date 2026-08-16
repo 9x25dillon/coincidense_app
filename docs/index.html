@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coincidence — a ten-minute tutorial</title>
+<meta name="description" content="Test whether apparent spatial coincidence survives contact with base rates.">
+<style>
+:root {
+  --bg: #fbfaf8; --panel: #ffffff; --ink: #1c1b19; --muted: #6b6863;
+  --line: #e5e1da; --accent: #0f766e; --warn: #b45309;
+  --code-bg: #f4f2ee;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16151a; --panel: #1e1d24; --ink: #eceaf0; --muted: #9d99a6;
+          --line: #33313c; --accent: #45b8ac; --warn: #e0a344; --code-bg: #232128; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 17px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 880px; margin: 0 auto; padding: 56px 22px 90px; }
+header { border-bottom: 3px solid var(--accent); padding-bottom: 30px; margin-bottom: 12px; }
+.kicker { text-transform: uppercase; letter-spacing: .14em; font-size: 11px;
+  color: var(--muted); margin: 0 0 14px; }
+h1 { font-size: clamp(30px, 6vw, 46px); line-height: 1.1; margin: 0 0 14px;
+  font-weight: 660; letter-spacing: -0.02em; }
+.lede { font-size: clamp(17px, 2.4vw, 20px); color: var(--muted); margin: 0; max-width: 60ch; }
+h2 { font-size: clamp(21px, 3vw, 26px); margin: 64px 0 4px; font-weight: 640;
+  letter-spacing: -0.01em; scroll-margin-top: 20px; }
+h2 .n { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: .5em;
+  font-weight: 700; }
+h3 { font-size: 17px; margin: 34px 0 6px; font-weight: 640; }
+p { margin: 14px 0; max-width: 68ch; }
+a { color: var(--accent); }
+code { font: 0.87em/1.5 ui-monospace, "DejaVu Sans Mono", monospace;
+  background: var(--code-bg); padding: .12em .4em; border-radius: 4px; }
+pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 7px;
+  padding: 15px 17px; overflow-x: auto; margin: 18px 0; }
+pre code { background: none; padding: 0; font-size: 14px; line-height: 1.6; }
+figure { margin: 22px 0 30px; }
+figure img { width: 100%; height: auto; display: block; border-radius: 8px;
+  border: 1px solid var(--line); }
+figcaption { color: var(--muted); font-size: 14px; margin-top: 10px; max-width: 68ch; }
+.note { border-left: 3px solid var(--accent); background: var(--panel);
+  border-radius: 0 6px 6px 0; padding: 14px 18px; margin: 24px 0; }
+.note p { margin: 0; }
+.note.warn { border-left-color: var(--warn); }
+.note strong { font-weight: 650; }
+.two { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  margin: 24px 0; }
+.two figure { margin: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; margin: 20px 0; }
+th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); border-bottom: 1px solid var(--line); padding: 7px 12px 7px 0; }
+td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line); }
+td.num { font-variant-numeric: tabular-nums; }
+ul { max-width: 68ch; padding-left: 22px; }
+li { margin: 7px 0; }
+.toc { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 18px 22px; margin: 34px 0 10px; }
+.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 34px; font-size: 15px; }
+.toc li { margin: 5px 0; break-inside: avoid; }
+footer { margin-top: 74px; padding-top: 22px; border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 14px; }
+@media (max-width: 620px) { .toc ol { columns: 1; } }
+</style>
+
+<main>
+<header>
+  <p class="kicker">coincidence · tutorial</p>
+  <h1>Does the overlap mean anything?</h1>
+  <p class="lede">Ten minutes, no installation, no dependencies. By the end you will have
+  taken a striking spatial coincidence apart and found out whether anything was left.</p>
+</header>
+
+<div class="toc">
+  <ol>
+    <li><a href="#see">See the problem</a></li>
+    <li><a href="#look">Look at your data</a></li>
+    <li><a href="#overlay">Ask the overlay question</a></li>
+    <li><a href="#baserate">Ask the base-rate question</a></li>
+    <li><a href="#report">Read the report</a></li>
+    <li><a href="#boundary">Declare your study region</a></li>
+    <li><a href="#sensitivity">Check the parameters</a></li>
+    <li><a href="#share">Share it</a></li>
+  </ol>
+</div>
+
+<h2 id="see"><span class="n">1</span>See the problem</h2>
+
+<p>Nothing to install. Python 3.10 or newer, standard library only.</p>
+
+<pre><code>git clone https://github.com/9x25dillon/coincidense_app.git
+cd coincidense_app
+python3 -m coincidence demo</code></pre>
+
+<figure>
+  <img src="images/demo.png" alt="Terminal output of coincidence demo, showing a 3.15x
+  association collapsing to 1.09x once the confound is declared">
+  <figcaption>The whole argument in one command, on data whose true answer we know.</figcaption>
+</figure>
+
+<p>Three synthetic layers. A and B both cluster where C is, and are otherwise drawn
+independently of each other — so the true relationship between A and B is <em>none</em>.
+Ask the naive question and they co-locate <strong>3.15×</strong> more than scattered
+points would, at p = 0.0033. Name the thing that drives both, and it falls to
+<strong>1.09×</strong>.</p>
+
+<p>The overlap was real. The first number was not wrong about it. What it could not tell
+you is that every bit of it was C.</p>
+
+<h2 id="look"><span class="n">2</span>Look at your data</h2>
+
+<p>Any located dataset: CSV, TSV, JSON, JSON Lines, or GeoJSON. Coordinate columns are
+detected automatically.</p>
+
+<pre><code>python3 -m coincidence describe examples/layer_a.csv</code></pre>
+
+<figure>
+  <img src="images/describe.png" alt="Terminal output of coincidence describe, showing
+  located rows, extent, total weight and evidence tier">
+  <figcaption>If the columns cannot be identified, the error prints every column with a
+  sample value from the first row, and suggests only the ones that parse as numbers.</figcaption>
+</figure>
+
+<p>Note the tier. Every file loads as <strong>D — uncertain provenance</strong>, and stays
+there until you assert otherwise with <code>--tier-a</code> / <code>--tier-b</code>.
+Claiming your data is authoritative is your assertion to make, not something a filename
+earns. Rows without usable coordinates are dropped and <em>counted</em>, never imputed.</p>
+
+<h2 id="overlay"><span class="n">3</span>Ask the overlay question</h2>
+
+<p>This is the question a map answers, and the reason overlay maps are so persuasive.</p>
+
+<pre><code>python3 -m coincidence test examples/layer_a.csv examples/layer_b.csv \
+    --tier-a A --tier-b A</code></pre>
+
+<figure>
+  <img src="images/naive.png" alt="Terminal output showing a 3.21x co-location against a
+  uniform null, with a warning that no confounds were declared">
+  <figcaption>A large, overwhelmingly significant association — against a null that
+  assumes observations could have landed anywhere with equal probability.</figcaption>
+</figure>
+
+<div class="note warn">
+  <p><strong>Nothing on Earth is uniformly distributed.</strong> Against that null almost
+  everything looks significant, which is exactly why so many overlay maps look so
+  convincing. The tool runs it, reports it, and tells you it is close to meaningless.</p>
+</div>
+
+<h2 id="baserate"><span class="n">4</span>Ask the base-rate question</h2>
+
+<p>Now supply the one thing that makes this a test rather than a picture: <strong>what
+else explains where your observations are?</strong></p>
+
+<pre><code>python3 -m coincidence test examples/layer_a.csv examples/layer_b.csv \
+    --confound examples/confound_c.csv --bins 10 --tier-a A --tier-b A</code></pre>
+
+<figure>
+  <img src="images/conditioned.png" alt="Terminal output showing no association beyond
+  chance at 1.09x once the confound is held fixed, with the null distribution plotted">
+  <figcaption>3.21× becomes 1.09×. The bar chart is the simulated null; the marker is
+  what was observed.</figcaption>
+</figure>
+
+<p>A confound is just another located dataset — points wherever the confounding thing is,
+optionally weighted with <code>--weight-c</code>. Population by place, road
+intersections, karst outcrops, survey control points. Repeat <code>--confound</code> for
+as many as you have. The null then resamples your layer <em>within</em> strata defined by
+those confounds, which destroys the association under test while preserving each layer's
+relationship to what explains it.</p>
+
+<h3>Two numbers, and only one of them is the answer</h3>
+
+<p>The <strong>effect ratio</strong> is the answer. 1.00× means the layers are exactly as
+co-located as the confounds already predict; 2.00× means twice as much; 0.50× means they
+actively avoid each other, which is as real a finding as clustering.</p>
+
+<p>The <strong>p-value is not the answer.</strong> Monte Carlo nulls tighten as you add
+simulations, so with enough of them a 2% deviation reads as p &lt; 0.01. A result needs an
+effect of at least 10% <em>and</em> p &lt; 0.05 before this tool will call it anything.
+Above, 8.8% at p = 0.0010 is reported as <em>no association</em> — and the statement says
+why.</p>
+
+<h2 id="report"><span class="n">5</span>Read the report</h2>
+
+<pre><code>python3 -m coincidence test examples/layer_a.csv examples/layer_b.csv \
+    --confound examples/confound_c.csv --bins 10 --tier-a A --tier-b A \
+    --sensitivity --report finding.html</code></pre>
+
+<p>One self-contained HTML file. No network, no assets, no build step — you can email it.</p>
+
+<figure>
+  <img src="images/report-hero.png" alt="Report header showing the verdict, effect ratio,
+  p-value and spatial scale">
+  <figcaption>The verdict, the effect size, and the scale the answer is about. A negative
+  result gets the same weight and the same space as a positive one.</figcaption>
+</figure>
+
+<figure>
+  <img src="images/report-null.png" alt="Report section plotting the null distribution
+  with the observed value marked, and a table of both directions of the test">
+  <figcaption>What chance looks like, in the same units as the headline ratio. Both
+  directions of the null are run — resampling A against a fixed B is a different test from
+  resampling B against a fixed A — and the conservative one is reported, so the answer
+  cannot depend on which file you typed first.</figcaption>
+</figure>
+
+<figure>
+  <img src="images/report-maps.png" alt="Four map panels: layer A, layer B, layer A under
+  the null, and the confound surface">
+  <figcaption>The surfaces the test actually ran on, one pixel per analysis cell.</figcaption>
+</figure>
+
+<div class="note">
+  <p><strong>Look at the third panel.</strong> That is <em>one draw from the null</em> —
+  layer A as chance would have arranged it, given the confound. If it is hard to tell from
+  the real layer A beside it, you are looking directly at why the ratio came back near 1.
+  You do not have to take the number's word for it.</p>
+</div>
+
+<h2 id="boundary"><span class="n">6</span>Declare your study region</h2>
+
+<p>This is the highest-value flag in the tool, and on some geometries it is not optional.</p>
+
+<p>Absent a real boundary, the engine infers the observation window from the convex hull
+of your points. For a roughly convex study area that is close enough. For a concave one it
+is not close at all. Here are two layers scattered <strong>independently</strong> inside a
+crescent-shaped survey area — no relationship whatsoever:</p>
+
+<div class="two">
+  <figure>
+    <img src="images/boundary-without.png" alt="Terminal output without a boundary
+    reporting 1.31x co-located, a false positive">
+    <figcaption><strong>Without a boundary.</strong> 1.31×, p = 0.0010, reported as
+    co-located. A confident false positive.</figcaption>
+  </figure>
+  <figure>
+    <img src="images/boundary-with.png" alt="Terminal output with the study region
+    declared reporting no association">
+    <figcaption><strong>With the region declared.</strong> 1.00×. The finding was the
+    hull's shape, not the data.</figcaption>
+  </figure>
+</div>
+
+<pre><code>python3 -m coincidence test occurrences.csv control.csv \
+    --cell-km 40 --boundary survey_area.geojson</code></pre>
+
+<p>A GeoJSON Polygon or MultiPolygon, holes included — a watershed, a county, a park, a
+survey extent, a coastline-clipped land area. Measured over eight trials on that crescent:</p>
+
+<table>
+  <tr><th>observation window</th><th>mean effect</th><th>mean deviation</th><th>worst</th></tr>
+  <tr><td>inferred convex hull</td><td class="num">1.307×</td><td class="num">30.7%</td>
+      <td class="num">33.4%</td></tr>
+  <tr><td>declared boundary</td><td class="num">1.005×</td><td class="num">0.6%</td>
+      <td class="num">1.9%</td></tr>
+</table>
+
+<p>Coastlines, valley floors, river corridors, mountain arcs and anything with a lake in
+it are all that shape. Declaring the region also lowers the noise floor from 10% to 4%,
+because the hull over-coverage the higher floor was paying for is gone — so a 5% effect
+becomes reportable.</p>
+
+<div class="note warn">
+  <p><strong>No statistic can tell you whether you are in this case.</strong> The tool
+  reports how much of an inferred window no observation reaches, but that is an upper
+  bound on possible over-coverage, not a concavity detector: clustered points inside a
+  perfectly convex region score higher than a genuine crescent. Where an observation
+  <em>could</em> have occurred is knowledge about the world, not a property of your
+  sample. That is the whole reason the boundary has to be declared.</p>
+</div>
+
+<h2 id="sensitivity"><span class="n">7</span>Check the parameters</h2>
+
+<p><code>--sensitivity</code> sweeps the two parameters that could otherwise decide your
+result on their own, holding the other fixed each time.</p>
+
+<figure>
+  <img src="images/report-sensitivity.png" alt="Two sensitivity tables, one sweeping grid
+  resolution at fixed bandwidth and one sweeping bandwidth at fixed cell size">
+  <figcaption>Each sweep varies one thing. The column being held fixed is printed beside
+  it so you can confirm that.</figcaption>
+</figure>
+
+<p>The two sweeps mean opposite things, and this is the part most worth internalising:</p>
+
+<ul>
+  <li>A conclusion that moves with <strong>cell size</strong> is a resolution artifact —
+  the modifiable areal unit problem — and should be discarded.</li>
+  <li>A conclusion that moves with <strong>bandwidth</strong> is usually real information
+  about the <em>scale</em> at which your layers are coupled. Two layers coupled at 5 km
+  read 4.9× under a 25 km kernel and 1.1× under a 200 km one. Both are correct answers to
+  different questions, which is why a ratio quoted without its bandwidth is not
+  interpretable.</li>
+</ul>
+
+<h2 id="share"><span class="n">8</span>Share it</h2>
+
+<pre><code>python3 -m coincidence test a.csv b.csv --confound pop.csv --export finding.json</code></pre>
+
+<p>The bundle carries the inputs and their provenance, every parameter, the null
+specification, the seed, and the result. Anyone with the same files re-runs it and gets
+the same numbers — or swaps the confound set and shows you exactly where you went wrong.
+The HTML report embeds the same bundle, so a report that arrives by email is still
+re-runnable.</p>
+
+<p>That is the point. A claim that comes with its null model attached is a claim someone
+can argue with precisely, instead of trading screenshots.</p>
+
+<h2>What it will not tell you</h2>
+
+<ul>
+  <li><strong>Anything causal.</strong> This measures spatial association. It cannot
+  distinguish mechanism, direction, or cause, and its output never implies it can.</li>
+  <li><strong>Anything about individuals.</strong> Association between areas does not
+  transfer to the people or objects in them.</li>
+  <li><strong>That you found everything.</strong> The engine can only condition on the
+  confounds you declare. An unmeasured confound remains the most likely explanation for
+  any residual association — and that is the single most common reason a spatial finding
+  turns out to be nothing.</li>
+</ul>
+
+<footer>
+  <p><a href="https://github.com/9x25dillon/coincidense_app/blob/main/README.md">README</a> ·
+     <a href="https://github.com/9x25dillon/coincidense_app/blob/main/docs/ANY_DATA.md">Input contract and limitations</a> ·
+     <a href="https://github.com/9x25dillon/coincidense_app/blob/main/docs/METHODOLOGY.md">Methodology, and eight defects found along the way</a> ·
+     <a href="https://github.com/9x25dillon/coincidense_app/blob/main/docs/EVIDENCE_STANDARDS.md">Evidence tiering</a> ·
+     <a href="https://github.com/9x25dillon/coincidense_app/blob/main/docs/ETHICS.md">Ethics</a> ·
+     <a href="https://github.com/9x25dillon/coincidense_app/blob/main/docs/ROADMAP.md">Roadmap</a> ·
+     <a href="https://github.com/9x25dillon/coincidense_app">Source</a></p>
+  <p>Every screenshot on this page is real output, captured from the commands shown
+  beside it.</p>
+</footer>
+</main>
+</html>

@@ -586,18 +586,43 @@ class TestDeclaredBoundary(unittest.TestCase):
         self.assertEqual(bounded.noise_floor, BOUNDED_NOISE_FLOOR)
         self.assertLess(BOUNDED_NOISE_FLOOR, NOISE_FLOOR)
 
-    def test_a_concave_inferred_window_is_warned_about(self):
-        """The floor does not catch this case, so the tool has to say so out loud."""
+    def test_an_unreached_window_prompts_for_a_boundary(self):
+        """The floor does not catch the concave case, so the tool has to say so."""
         hull = test_pair(self.x, self.y, cell_km=40.0, n_sim=19, seed=3)
         self.assertTrue(any("--boundary" in w for w in hull.warnings))
 
-    def test_a_convex_extent_is_not_warned_about(self):
+    def test_a_filled_convex_extent_is_not_warned_about(self):
         rng = random.Random(11)
         box = lambda n: [(rng.uniform(-105.0, -95.0), rng.uniform(36.0, 44.0))
                          for _ in range(n)]
         r = test_pair(Layer("p", box(300), tier="A"), Layer("q", box(300), tier="A"),
                       cell_km=40.0, n_sim=19, seed=3)
         self.assertFalse(any("--boundary" in w for w in r.warnings))
+
+    def test_the_emptiness_measure_does_not_claim_to_detect_concavity(self):
+        """Regression test for a defect in a warning, which is still a defect.
+
+        The measure was introduced as a concavity detector. It is not one and cannot
+        be: clustered points inside a perfectly convex box score HIGHER than a genuine
+        crescent, because clustering and concavity are not separable from the points
+        alone. The number survives as an upper bound on possible over-coverage; the
+        claim did not, and the wording must not quietly get it back.
+        """
+        from coincidence.analysis import prepare
+        rng = random.Random(1)
+        hot = [(-104.0, 37.0), (-97.0, 43.0), (-95.0, 36.0)]
+        clump = lambda n: [(rng.gauss(hot[rng.randrange(3)][0], 0.8),
+                            rng.gauss(hot[rng.randrange(3)][1], 0.8)) for _ in range(n)]
+        clustered = prepare(Layer("a", clump(350), tier="A"),
+                            Layer("b", clump(350), tier="A"), cell_km=40.0)
+        crescent = prepare(self.x, self.y, cell_km=40.0)
+        self.assertGreater(clustered.window_emptiness(), crescent.window_emptiness())
+
+        warned = test_pair(Layer("a", clump(350), tier="A"),
+                           Layer("b", clump(350), tier="A"), cell_km=40.0, n_sim=19)
+        text = " ".join(warned.warnings)
+        self.assertIn("upper bound", text)
+        self.assertNotIn("region is concave", text)
 
     def test_observations_outside_the_boundary_are_dropped_and_reported(self):
         """Keeping them would let an outside point smooth into the window and raise the

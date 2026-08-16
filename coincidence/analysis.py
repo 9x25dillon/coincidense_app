@@ -43,10 +43,8 @@ BOUNDED_NOISE_FLOOR = 0.04
 # retained fraction would turn rounding error into a hotspot.
 EDGE_FLOOR = 0.05
 
-# How empty an inferred window may be before it is reported as the wrong shape.
-# Measured: convex extents run 0%, a crescent runs 9-10% and produces a 1.31x false
-# positive. Five percent separates them with room on both sides.
-CONCAVE_WINDOW_LIMIT = 0.05
+# How much of an inferred window may go unreached before the tool says so.
+SPARSE_WINDOW_LIMIT = 0.05
 
 
 def colocation(a: list[float], b: list[float], mask: list[bool] | None = None) -> float:
@@ -302,18 +300,20 @@ class Prepared:
         return BOUNDED_NOISE_FLOOR if self.boundary is not None else NOISE_FLOOR
 
     def window_emptiness(self) -> float:
-        """Fraction of the window carrying essentially none of the combined intensity.
+        """Fraction of the inferred window that no observation reaches.
 
-        A diagnostic for the failure the noise floor does NOT catch. The floor was
-        calibrated on a roughly convex extent, where the inferred hull is close to the
-        truth. On a genuinely concave region it is not close at all: on a crescent, two
-        independent layers read 1.31x under the hull — a confident false positive three
-        times the size of the floor meant to suppress it.
+        Read this as an UPPER BOUND on how much the convex hull may be over-covering,
+        and nothing more precise than that. It is deliberately not called a concavity
+        measure, because it cannot be one: uniform points in a convex box score 0%, a
+        uniform crescent scores 9%, and clustered points inside a perfectly convex box
+        score 15% — higher than the genuinely concave case. Clustering and concavity
+        are not separable from the points alone.
 
-        The signature of that case is a hull enclosing large tracts no observation
-        reaches. Measured here, the same crescent runs 9-10% empty while convex extents
-        run 0%, so the emptiness of the window is a usable warning that the window is
-        the wrong shape and a real boundary is needed rather than optional.
+        That is not a limitation to work around, it is the reason `--boundary` exists.
+        Where an observation could have occurred is knowledge about the world, not a
+        property of the sample, and no statistic computed from the sample can recover
+        it. What this number can honestly do is say how much room there is for the
+        hull to be wrong, so the caller knows whether it is worth declaring the region.
         """
         total = [x + y for x, y in zip(self.intensity_a, self.intensity_b)]
         vals = [v for v, inside in zip(total, self.window) if inside]
@@ -577,14 +577,15 @@ def test_pair(
     warnings = []
     if prep.boundary is None:
         empty = prep.window_emptiness()
-        if empty > CONCAVE_WINDOW_LIMIT:
+        if empty > SPARSE_WINDOW_LIMIT:
             warnings.append(
-                f"The inferred convex-hull window is {empty * 100:.0f}% empty — large "
-                f"tracts inside it are reached by no observation, which means the study "
-                f"region is concave and the hull is the wrong shape for it. This is the "
-                f"one case the noise floor does NOT protect you from: on a crescent-"
-                f"shaped region, two layers known to be independent read 1.31x. Supply "
-                f"the real study region with --boundary before believing this number."
+                f"{empty * 100:.0f}% of the inferred convex-hull window is reached by no "
+                f"observation. That is an upper bound on how much the hull may be "
+                f"over-covering the real study region — it is equally consistent with "
+                f"clustered data inside a perfectly valid window, and the points cannot "
+                f"tell those apart. It matters because the noise floor does not cover "
+                f"this: on a concave region two layers known to be independent read "
+                f"1.31x. If you know the region, declare it with --boundary."
             )
     if prep.outside_boundary:
         detail = ", ".join(f"{n} from {name}" for name, n in prep.outside_boundary.items())

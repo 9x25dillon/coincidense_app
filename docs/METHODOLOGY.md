@@ -220,10 +220,26 @@ boundary is declared — roughly twice the worst residual measured above, which 
 left once the hull term is gone: Monte Carlo scatter and the cell-centre rule at the
 edge.
 
-Because the floor cannot catch the concave case, the tool now detects it instead. It
-measures what fraction of the inferred window is reached by no observation at all —
-0% on convex extents, 9-10% on the crescent — and warns above 5% that the window is the
-wrong shape and a real boundary is needed rather than optional.
+Because the floor cannot catch the concave case, the tool reports what it can measure:
+the fraction of an inferred window that no observation reaches, above 5%.
+
+**And that measure is the eighth defect**, caught while capturing screenshots for the
+tutorial — the warning fired on the standard worked example, which is not concave at
+all. It was introduced as a concavity detector and it is not one. Uniform points in a
+convex box score 0%, a uniform crescent scores 9%, and clustered points inside a
+perfectly convex box score **15%** — higher than the genuinely concave case it was
+built to flag. Clustering and concavity are not separable from the points alone, so a
+statistic computed from the points cannot distinguish them, and the original wording
+("the study region is concave") was a confident claim its own evidence could not
+support. Precisely the failure this project is about, committed in a warning about that
+failure.
+
+The number survives, with the claim removed. It is now reported as an upper bound on
+how much the hull may be over-covering, explicitly consistent with either clustering or
+concavity, and it says the user must decide which. Where an observation could have
+occurred is knowledge about the world, not a property of the sample. No statistic
+recovers it, which is the whole argument for declaring the boundary rather than
+inferring it.
 
 Two consequences follow from declaring a boundary, both deliberate. The analysis grid is
 cut to the boundary rather than to the data, so a confound file covering half a continent
@@ -272,8 +288,9 @@ resolution artifacts — see the fifth entry above.
 ## Known limitations to state up front
 
 - Without `--boundary`, the observation window is a convex hull, which over-covers any
-  concave study region. On a crescent this alone produces a 1.31x false positive. The
-  tool warns when it detects the signature, but the fix is to supply the boundary.
+  concave study region. On a crescent this alone produces a 1.31x false positive, and
+  no diagnostic computed from the points can tell you whether you are in that case.
+  Supply the boundary.
 - Ecological inference: area-level association does not transfer to individuals.
 - Edge effects at the US–Canada and US–Mexico borders, where reporting regimes change
   discontinuously and datasets are not harmonized.
