@@ -10,21 +10,32 @@ Pure Python standard library. No install, no dependencies, no network, no build 
 ## Try it in thirty seconds
 
 ```bash
-python3 examples/make_synthetic.py
-
-# Two layers that both cluster where a third thing is, and are otherwise
-# unrelated to each other. The naive test finds a striking association:
-python3 -m coincidence test examples/layer_a.csv examples/layer_b.csv
-
-# Declare the thing that actually drives both, and it evaporates:
-python3 -m coincidence test examples/layer_a.csv examples/layer_b.csv \
-    --confound examples/confound_c.csv --bins 10 --sensitivity
+python3 -m coincidence demo
 ```
 
-The first command reports a large, highly significant association. The second reports
-that it was the confound all along. There is no relationship between those two layers —
-the generator built them independently — and the difference between those two commands
-is the entire reason this project exists.
+Two synthetic layers that both cluster where a third thing is, and are otherwise
+unrelated to each other. The naive question reports a large, overwhelmingly significant
+association. Declare the thing that actually drives both and it evaporates:
+
+```
+  1. The overlay question — no confounds declared
+     effect 3.15×   p = 0.0033   — a large, overwhelmingly significant association
+
+  2. The base-rate question — conditioned on C
+     effect 1.09×   p = 0.0033   — it was the confound all along
+```
+
+There is no relationship between those two layers; the generator built them
+independently. The gap between those two numbers is the entire reason this project
+exists.
+
+Same thing on files, with a visual report:
+
+```bash
+python3 examples/make_synthetic.py
+python3 -m coincidence test examples/layer_a.csv examples/layer_b.csv \
+    --confound examples/confound_c.csv --bins 10 --sensitivity --report finding.html
+```
 
 ## The problem it exists to solve
 
@@ -51,8 +62,13 @@ analytical question is identical.
 ```bash
 python3 -m coincidence describe mydata.csv
 python3 -m coincidence test sightings.csv towers.csv --confound population.csv
-python3 -m coincidence test a.csv b.csv --confound pop.csv --export finding.json
+python3 -m coincidence test a.csv b.csv --confound pop.csv --report finding.html
 ```
+
+Column names are auto-detected, overridable globally (`--lat`, `--lon`) or per layer
+(`--lat-a`, `--lon-b`, `--weight-c`). Unreadable columns produce an error that shows
+what the file actually contains, with a sample value from each column, rather than a
+list of names.
 
 Full input contract, output interpretation, and limitations: [`docs/ANY_DATA.md`](docs/ANY_DATA.md).
 
@@ -71,8 +87,28 @@ p < 0.05 before the tool will call it anything.
 questions. `--sensitivity` sweeps grid resolution and bandwidth so one parameter choice
 cannot quietly decide your result.
 
-**Negative results are printed.** "No association beyond chance" gets the same prominence
-as a positive, because it is equally a finding.
+**The null is drawn, not asserted.** The terminal prints the simulated null as a
+distribution with the observation marked on it, in the same units as the headline ratio.
+`--report` writes a self-contained HTML page carrying the analysis surfaces themselves —
+layer A, layer B, and *one draw from the null beside them*. When the observation and the
+null draw look alike, you can see why the number came back near 1 instead of taking the
+tool's word for it.
+
+**Negative results are printed.** "No association beyond chance" gets the same banner,
+the same colour weight, and the same space as a positive, because it is equally a
+finding. A UI that renders it as a failure would undo in styling what the engine is for.
+
+**The answer does not depend on argument order.** The null resamples one layer and holds
+the other fixed, which is a different test depending on which one moves. Both directions
+are run and the conservative one is reported.
+
+**The study region is yours to declare.** `--boundary region.geojson` replaces the
+inferred convex hull with the real thing. This matters more than it sounds: on a
+crescent-shaped region, two layers scattered *independently* read **1.31x** under the
+inferred hull — a confident false positive at three times the noise floor meant to
+suppress it. With the boundary declared they read 1.005x. Coastlines, valley floors and
+river corridors are all that shape, so the tool now detects the signature and says so.
+Declaring a boundary also lowers the floor from 10% to 4%.
 
 **Provenance is a type.** Every layer carries an evidence tier through ingest, analysis,
 and output. Data loads as *uncertain* until you assert otherwise — see
@@ -88,10 +124,13 @@ precisely, rather than trading screenshots.
 python3 -m unittest discover -s tests -v
 ```
 
-40 tests, including the executable form of the project's central claim: a confounded
+75 tests, including the executable form of the project's central claim: a confounded
 association must collapse when conditioned, a genuine one must survive, and two
 independent layers must come back as unrelated. Several were written after the
-implementation got those wrong — see [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md#what-went-wrong-on-the-way-here).
+implementation got those wrong — seven defects so far, each of which produced confident
+false positives or false dismissals, all written up in
+[`docs/METHODOLOGY.md`](docs/METHODOLOGY.md#what-went-wrong-on-the-way-here) rather than
+quietly fixed.
 
 ## The originating case study
 
@@ -110,11 +149,14 @@ and no missing person appears on a map by name. See [`docs/ETHICS.md`](docs/ETHI
 ```
 coincidence/                the engine
   loading.py                any format in — CSV, JSON, JSONL, GeoJSON
+  boundary.py               declared study region: GeoJSON polygons, holes included
   projection.py             equal-area projection (Albers, cylindrical)
   grid.py                   analysis grid, kernel smoothing, observation window
   nulls.py                  stratified surrogate generation
   analysis.py               co-location statistic, Monte Carlo testing, reporting
-  cli.py                    describe / test
+  console.py                terminal presentation, null plot
+  report.py                 self-contained HTML report with the analysis surfaces
+  cli.py                    demo / describe / test
 docs/
   ANY_DATA.md               input contract, reading results, limitations
   EVIDENCE_STANDARDS.md     tiering and how it's enforced

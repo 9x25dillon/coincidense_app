@@ -70,6 +70,11 @@ correlation panel — that is a configuration error, not a permissive default.
 
 ## Analytical pipeline
 
+**0. Declare the study region.** `--boundary region.geojson` — the polygon
+observations could have come from. Absent one the engine infers a convex hull, which is
+adequate for a convex extent and actively wrong for a concave one. See the seventh
+defect below.
+
 **1. Normalize.** Reproject all layers to Albers Equal Area Conic (NAD83). Area-based
 statistics on a Mercator basemap are wrong by a factor that varies with latitude, which
 across an Alaska-to-Yucatán extent is not a rounding error.
@@ -89,7 +94,18 @@ defined by the confound stack rather than uniformly across space. This is the st
 genre skips.
 
 **5. Test.** Monte Carlo comparison of observed co-location against the surrogate
-distribution. Report effect size with a confidence interval.
+distribution, run in both directions — resampling A against a fixed B, then B against a
+fixed A — with the conservative direction reported. Effect size with a confidence
+interval.
+
+The simulation loop never smooths a surrogate. The co-location statistic only ever
+reads a surrogate through inner products, and Gaussian smoothing is self-adjoint, so
+`<Ks, w> = <s, Kw>`: the convolution is applied once to the fixed side and hoisted out
+of the loop, leaving one array lookup per point per simulation instead of a full
+convolution of the grid. This is an exact rearrangement rather than an approximation,
+and it is asserted as such in the test suite against the literal smooth-every-surrogate
+implementation. It matters methodologically, not just operationally — a null model that
+takes minutes to run is a null model people skip.
 
 **6. Report honestly.** Output is an effect size, an interval, the null model's
 specification, and a plain-language statement of what the result licenses. Not a verdict.
@@ -141,10 +157,88 @@ rescaled by the fraction of its kernel that stayed inside.
 After all four, two independent layers read 1.02x — and that residual is why the noise
 floor exists.
 
+Two more surfaced in the review after that, and they are the same species: not errors
+in the statistic, but places where a reported quantity was contaminated by something
+the report did not name.
+
+**A cell-size sweep that also swept the bandwidth.** The sensitivity sweep exists to
+separate a finding from a parameter choice, and it was conflating the two parameters it
+was meant to hold apart. Bandwidth was specified in *cells*, so changing the cell size
+changed the kernel with it: cells of 25, 50 and 100 km carried kernels of 61, 122 and
+244 km. On the worked example the effect ratio moved 1.11x → 1.09x → 1.00x across that
+sweep, and the tool announced *"the conclusion CHANGES with cell size — that is a
+resolution artifact (MAUP), not a finding"* and advised discarding it. Every bit of the
+movement was the bandwidth. Held fixed at 122 km, the same sweep reads 1.08x / 1.09x /
+1.08x and there is no resolution artifact at all. A tool built to catch other people's
+confounding was, in its own diagnostic, confounding two variables and misattributing the
+result — in the direction of dismissing a real scale effect. The cell-size sweep now
+holds the bandwidth fixed in kilometres and varies only the raster.
+
+**A test that depended on argument order.** The null resamples one layer and holds the
+other fixed. That is a legitimate conditional randomization, but it is a different test
+depending on which layer moves, because each layer brings its own stratum totals and its
+own granularity to the null. `test(a, b)` and `test(b, a)` therefore returned different
+numbers — a small difference on the worked example (1.087x versus 1.094x), but nothing
+bounds it in general, and "which one did you type first" is not a defensible input to a
+finding. Both directions are now run and the conservative one is reported: the ratio
+closer to 1.0, with the larger p-value. When the two disagree enough to change the
+verdict, that disagreement is raised as a warning rather than resolved silently, because
+a result that hinges on which layer is held fixed is usually telling you the two layers
+are resolved at different granularities, not that they are associated.
+
+## The observation window, and the seventh defect
+
+**The noise floor does not protect a concave study region.** This is the most serious
+thing found so far and it invalidated an assumption the previous five entries were
+written under.
+
+The 10% floor was calibrated against synthetic data on a roughly convex extent, where
+the convex hull is close to the truth and the residual is a couple of percent. On a
+genuinely concave region it is not close to the truth at all. Measured on a crescent —
+two layers scattered *independently* inside it, 350 points each, eight trials — the
+inferred hull returns a mean effect of **1.31x, worst trial 1.33x**. That is a confident
+false positive at three times the floor built to suppress it, on data with no
+relationship whatsoever, and every earlier statement that the floor bounds the window
+error was true only for the convex case.
+
+The mechanism is the same one as the second defect, which was fixed but only halfway.
+A hull over a crescent encloses the empty middle, the null scatters surrogates through
+territory no observation could occupy, and both real layers look concentrated together
+by comparison. Crescents are not exotic: a coastline, a valley floor, a mountain arc, a
+river corridor, a county with a lake in it.
+
+Declaring the true region with `--boundary` removes it. The same eight trials return a
+mean of **1.005x, worst deviation 1.85%**:
+
+| window | mean effect | mean deviation | worst |
+|---|---|---|---|
+| inferred convex hull | 1.307x | 30.7% | 33.4% |
+| declared boundary | 1.005x | 0.6% | 1.9% |
+
+So there are two floors. **10%** when the window is inferred, unchanged. **4%** when a
+boundary is declared — roughly twice the worst residual measured above, which is what is
+left once the hull term is gone: Monte Carlo scatter and the cell-centre rule at the
+edge.
+
+Because the floor cannot catch the concave case, the tool now detects it instead. It
+measures what fraction of the inferred window is reached by no observation at all —
+0% on convex extents, 9-10% on the crescent — and warns above 5% that the window is the
+wrong shape and a real boundary is needed rather than optional.
+
+Two consequences follow from declaring a boundary, both deliberate. The analysis grid is
+cut to the boundary rather than to the data, so a confound file covering half a continent
+no longer drags the extent out with it. And observations of the tested layers falling
+outside the declared region are dropped with a count kept and reported, because the null
+draws surrogate mass only from inside the window: an outside point left in place would
+smooth into the window and raise the observed statistic while contributing nothing to the
+null, comparing two quantities computed over different ground. Confounds are exempt —
+they never contribute mass to the null, only shape to the surface, and a city just over
+the line genuinely does inform the intensity at the edge.
+
 ## The noise floor
 
 A result must show at least a 10% deviation from the null *and* p < 0.05 before the tool
-will call it anything.
+will call it anything — 4% when a study boundary has been declared.
 
 The p-value alone is not enough, and this is not a stylistic preference. Monte Carlo
 nulls tighten without bound as simulations increase, so with enough of them a 2%
@@ -153,8 +247,9 @@ error, because an inferred convex-hull window over-covers any concave study regi
 Reporting that as a finding would be precisely the failure this tool exists to prevent,
 merely dressed in a p-value.
 
-Supplying a real study boundary instead of an inferred one would lower the floor. Until
-then, honesty requires it.
+Supplying a real study boundary with `--boundary` lowers the floor to 4% and, on a
+concave region, is the difference between a correct answer and a manufactured one. See
+the section above.
 
 ## Bandwidth is the question, not a parameter
 
@@ -170,8 +265,15 @@ sweeps carry different warnings. A conclusion that flips with *cell size* is a r
 artifact and should be discarded. A conclusion that changes with *bandwidth* is usually
 real information about the scale of the coupling, and should be reported as such.
 
+Which is exactly why the two sweeps have to vary one thing each. Specifying bandwidth in
+cells rather than kilometres couples them, and a coupled sweep files scale effects under
+resolution artifacts — see the fifth entry above.
+
 ## Known limitations to state up front
 
+- Without `--boundary`, the observation window is a convex hull, which over-covers any
+  concave study region. On a crescent this alone produces a 1.31x false positive. The
+  tool warns when it detects the signature, but the fix is to supply the boundary.
 - Ecological inference: area-level association does not transfer to individuals.
 - Edge effects at the US–Canada and US–Mexico borders, where reporting regimes change
   discontinuously and datasets are not harmonized.

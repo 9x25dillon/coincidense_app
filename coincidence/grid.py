@@ -137,6 +137,29 @@ def _cross(o, a, b) -> float:
     return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
 
 
+def window_from_rings(rings: list[list[tuple[float, float]]], grid: Grid) -> list[bool]:
+    """The observation window from a declared study boundary, in projected metres.
+
+    A cell is in when its centre is in. No dilation: an inferred hull is padded because
+    it is a guess, and a supplied boundary is not a guess. Cells straddling the edge are
+    resolved by their centres, which is the conventional rule and the only one that
+    keeps the window's area unbiased — including partial cells would inflate the region,
+    excluding them all would shrink it.
+    """
+    from .boundary import rings_contain
+
+    out = [False] * grid.n_cells
+    half = grid.cell_m / 2.0
+    for iy in range(grid.ny):
+        y = grid.y_min + iy * grid.cell_m + half
+        row = iy * grid.nx
+        for ix in range(grid.nx):
+            x = grid.x_min + ix * grid.cell_m + half
+            if rings_contain(rings, x, y):
+                out[row + ix] = True
+    return out
+
+
 def observation_window(
     projected: list[list[tuple[float, float]]], grid: Grid, dilate_cells: int = 0
 ) -> list[bool]:

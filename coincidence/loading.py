@@ -208,21 +208,55 @@ def _mean_positions(positions) -> tuple[float, float] | None:
 # ------------------------------------------------------------- extraction --
 
 
+def _columns(records) -> str:
+    """The file's columns with a sample value each.
+
+    A bare list of column names is not much help when the problem is that the column
+    you meant holds text, or is empty, or is the one two along. Showing what is
+    actually in the first row usually answers the question without a second command.
+    """
+    first = records[0]
+    parts = []
+    for key in list(first.keys())[:12]:
+        sample = str(first.get(key, ""))
+        if len(sample) > 18:
+            sample = sample[:17] + "…"
+        parts.append(f"    {key!r:<22} e.g. {sample!r}")
+    if len(first) > 12:
+        parts.append(f"    … and {len(first) - 12} more")
+    return "\n".join(parts)
+
+
 def _extract(records, *, lat_field, lon_field, weight_field, path):
     keys = list(records[0].keys())
     lat_key = lat_field or _find_field(keys, LAT_NAMES) or ("__lat__" if "__lat__" in keys else None)
     lon_key = lon_field or _find_field(keys, LON_NAMES) or ("__lon__" if "__lon__" in keys else None)
 
     if lat_key is None or lon_key is None:
+        # Suggest columns that could plausibly BE coordinates. Naming the first and
+        # last column regardless of content invites the user to declare a site name as
+        # a longitude, and the loader would then drop every row and blame the data.
+        numeric = [k for k in keys if _to_float(records[0].get(k)) is not None]
+        hint = (
+            f"  Name them explicitly: --lat {numeric[0]} --lon {numeric[1]}"
+            if len(numeric) >= 2 else
+            "  Name them explicitly with --lat and --lon."
+        )
         raise LoadError(
-            f"{path}: could not identify coordinate columns among {keys!r}. "
-            f"Name them with --lat/--lon."
+            f"{path}: could not identify coordinate columns. The file has:\n"
+            f"{_columns(records)}\n{hint}"
         )
     for named, key in (("--lat", lat_key), ("--lon", lon_key)):
         if key not in keys:
-            raise LoadError(f"{path}: {named} column {key!r} not found; have {keys!r}")
+            raise LoadError(
+                f"{path}: {named} column {key!r} not found. The file has:\n"
+                f"{_columns(records)}"
+            )
     if weight_field and weight_field not in keys:
-        raise LoadError(f"{path}: --weight column {weight_field!r} not found; have {keys!r}")
+        raise LoadError(
+            f"{path}: --weight column {weight_field!r} not found. The file has:\n"
+            f"{_columns(records)}"
+        )
 
     points, weights, dropped = [], [], 0
     for rec in records:
