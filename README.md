@@ -180,6 +180,13 @@ prompts/                    the originating specification
 VISION.md                   ambition and trajectory
 ```
 
+## License
+
+MIT — see [`LICENSE`](LICENSE). Use it, fork it, take the method somewhere else. The
+point of a shared null model is that a second person can re-run your analysis, swap the
+confound set, and show you precisely where you went wrong; that only works if they are
+allowed to.
+
 ## Status
 
 The engine works and is tested. The North America case-study data is not yet ingested.
