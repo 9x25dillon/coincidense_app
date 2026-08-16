@@ -89,7 +89,18 @@ defined by the confound stack rather than uniformly across space. This is the st
 genre skips.
 
 **5. Test.** Monte Carlo comparison of observed co-location against the surrogate
-distribution. Report effect size with a confidence interval.
+distribution, run in both directions — resampling A against a fixed B, then B against a
+fixed A — with the conservative direction reported. Effect size with a confidence
+interval.
+
+The simulation loop never smooths a surrogate. The co-location statistic only ever
+reads a surrogate through inner products, and Gaussian smoothing is self-adjoint, so
+`<Ks, w> = <s, Kw>`: the convolution is applied once to the fixed side and hoisted out
+of the loop, leaving one array lookup per point per simulation instead of a full
+convolution of the grid. This is an exact rearrangement rather than an approximation,
+and it is asserted as such in the test suite against the literal smooth-every-surrogate
+implementation. It matters methodologically, not just operationally — a null model that
+takes minutes to run is a null model people skip.
 
 **6. Report honestly.** Output is an effect size, an interval, the null model's
 specification, and a plain-language statement of what the result licenses. Not a verdict.
@@ -141,6 +152,35 @@ rescaled by the fraction of its kernel that stayed inside.
 After all four, two independent layers read 1.02x — and that residual is why the noise
 floor exists.
 
+Two more surfaced in the review after that, and they are the same species: not errors
+in the statistic, but places where a reported quantity was contaminated by something
+the report did not name.
+
+**A cell-size sweep that also swept the bandwidth.** The sensitivity sweep exists to
+separate a finding from a parameter choice, and it was conflating the two parameters it
+was meant to hold apart. Bandwidth was specified in *cells*, so changing the cell size
+changed the kernel with it: cells of 25, 50 and 100 km carried kernels of 61, 122 and
+244 km. On the worked example the effect ratio moved 1.11x → 1.09x → 1.00x across that
+sweep, and the tool announced *"the conclusion CHANGES with cell size — that is a
+resolution artifact (MAUP), not a finding"* and advised discarding it. Every bit of the
+movement was the bandwidth. Held fixed at 122 km, the same sweep reads 1.08x / 1.09x /
+1.08x and there is no resolution artifact at all. A tool built to catch other people's
+confounding was, in its own diagnostic, confounding two variables and misattributing the
+result — in the direction of dismissing a real scale effect. The cell-size sweep now
+holds the bandwidth fixed in kilometres and varies only the raster.
+
+**A test that depended on argument order.** The null resamples one layer and holds the
+other fixed. That is a legitimate conditional randomization, but it is a different test
+depending on which layer moves, because each layer brings its own stratum totals and its
+own granularity to the null. `test(a, b)` and `test(b, a)` therefore returned different
+numbers — a small difference on the worked example (1.087x versus 1.094x), but nothing
+bounds it in general, and "which one did you type first" is not a defensible input to a
+finding. Both directions are now run and the conservative one is reported: the ratio
+closer to 1.0, with the larger p-value. When the two disagree enough to change the
+verdict, that disagreement is raised as a warning rather than resolved silently, because
+a result that hinges on which layer is held fixed is usually telling you the two layers
+are resolved at different granularities, not that they are associated.
+
 ## The noise floor
 
 A result must show at least a 10% deviation from the null *and* p < 0.05 before the tool
@@ -169,6 +209,10 @@ This is why the sensitivity sweep covers bandwidth as well as cell size, and why
 sweeps carry different warnings. A conclusion that flips with *cell size* is a resolution
 artifact and should be discarded. A conclusion that changes with *bandwidth* is usually
 real information about the scale of the coupling, and should be reported as such.
+
+Which is exactly why the two sweeps have to vary one thing each. Specifying bandwidth in
+cells rather than kilometres couples them, and a coupled sweep files scale effects under
+resolution artifacts — see the fifth entry above.
 
 ## Known limitations to state up front
 

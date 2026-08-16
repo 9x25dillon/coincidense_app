@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import math
 import os
@@ -376,6 +378,261 @@ class TestTheThesis(unittest.TestCase):
     def test_p_value_can_never_be_zero(self):
         result = test_pair(self.a, self.b, cell_km=50.0, n_sim=19, seed=1)
         self.assertGreater(result.p_value, 0.0)
+
+
+class TestFastNullIsTheSameNull(unittest.TestCase):
+    """The simulation loop does not smooth. It hoists the convolution onto the fixed
+    side using the fact that Gaussian smoothing is self-adjoint, which is an exact
+    rearrangement — so it has to agree with the literal version to floating point, not
+    approximately. If this ever drifts, every number the tool prints is wrong."""
+
+    def setUp(self):
+        rng = random.Random(4)
+        hot = [(-84.0, 37.2), (-100.0, 40.0), (-115.0, 35.0)]
+        self.a = Layer("a", _cluster(rng, hot, 150, 1.5), tier="A")
+        self.b = Layer("b", _cluster(rng, hot, 170, 1.8), tier="A")
+        self.c = Layer("c", _cluster(rng, hot, 500, 2.0), tier="A")
+
+    def test_matches_the_literal_smooth_every_surrogate_version(self):
+        from coincidence.analysis import _simulate, colocation, prepare
+        from coincidence.nulls import stratum_totals, surrogate
+
+        prep = prepare(self.a, self.b, confounds=[self.c], cell_km=75.0, n_bins=6)
+        observed = colocation(prep.intensity_a, prep.intensity_b, prep.window)
+
+        totals = stratum_totals(prep.raster_a, prep.strata)
+        rng = random.Random(11)
+        slow = [
+            colocation(prep.intensity(surrogate(totals, prep.strata, rng)),
+                       prep.intensity_b, prep.window)
+            for _ in range(20)
+        ]
+        fast = _simulate(prep, move_raster=prep.raster_a, fixed=prep.intensity_b,
+                         label="a", observed=observed, n_sim=20, seed=11).values
+
+        for s, f in zip(slow, fast):
+            self.assertAlmostEqual(s, f, places=9)
+
+    def test_smoothing_is_self_adjoint(self):
+        """The identity the whole rearrangement rests on."""
+        grid = Grid(0.0, 0.0, 1000.0, 13, 11)
+        rng = random.Random(0)
+        s = [rng.random() for _ in range(grid.n_cells)]
+        t = [rng.random() for _ in range(grid.n_cells)]
+        self.assertAlmostEqual(
+            sum(x * y for x, y in zip(smooth(s, grid, 1.7), t)),
+            sum(x * y for x, y in zip(s, smooth(t, grid, 1.7))),
+            places=10,
+        )
+
+    def test_surrogate_dot_agrees_with_building_the_surrogate(self):
+        from coincidence.nulls import surrogate_dot
+        grid = Grid(0.0, 0.0, 1000.0, 8, 1)
+        strata = build_strata(grid, {"c": [0.0, 0.0, 1.0, 1.0, 5.0, 5.0, 9.0, 9.0]},
+                              n_bins=3)
+        totals = stratum_totals([4.0, 0.0, 3.0, 0.0, 0.0, 6.0, 2.0, 0.0], strata)
+        weights = [float(i) for i in range(8)]
+        built = surrogate(totals, strata, random.Random(3))
+        dotted = surrogate_dot(totals, strata, random.Random(3), [weights])
+        self.assertAlmostEqual(sum(x * w for x, w in zip(built, weights)), dotted[0],
+                               places=9)
+
+
+class TestWeightedLayersTerminate(unittest.TestCase):
+    def test_a_heavily_weighted_layer_does_not_draw_forever(self):
+        """A layer weighted by population can total millions. One draw per unit of
+        weight would make the tool appear to hang; the cap keeps the realization
+        plausible and the mass exact."""
+        from coincidence.nulls import MAX_DRAWS, surrogate
+        grid = Grid(0.0, 0.0, 1000.0, 4, 1)
+        strata = build_strata(grid, {"c": [1.0, 1.0, 1.0, 1.0]}, n_bins=2)
+        sim = surrogate({0: 5_000_000.0}, strata, random.Random(0))
+        self.assertAlmostEqual(sum(sim), 5_000_000.0, places=3)
+        self.assertLessEqual(MAX_DRAWS, 50_000)
+
+
+class TestBothDirectionsOfTheNull(unittest.TestCase):
+    """Resampling A against a fixed B and resampling B against a fixed A are different
+    tests of the same hypothesis. Reporting only the first makes the answer depend on
+    argument order."""
+
+    def setUp(self):
+        rng = random.Random(31)
+        hot = [(-84.0, 37.2), (-100.0, 40.0), (-115.0, 35.0)]
+        self.a = Layer("a", _cluster(rng, hot, 160, 1.5), tier="A")
+        self.b = Layer("b", _cluster(rng, hot, 300, 2.4), tier="A")
+        self.c = Layer("c", _cluster(rng, hot, 600, 2.0), tier="A")
+
+    def test_both_directions_are_run_and_recorded(self):
+        r = test_pair(self.a, self.b, confounds=[self.c], n_sim=49, seed=2)
+        self.assertEqual(len(r.nulls), 2)
+        self.assertEqual({n.resampled for n in r.nulls}, {"a", "b"})
+        self.assertEqual(len(r.to_dict()["null"]["directions"]), 2)
+
+    def test_the_conservative_direction_is_the_one_reported(self):
+        r = test_pair(self.a, self.b, confounds=[self.c], n_sim=49, seed=2)
+        claims = [abs(n.effect_ratio - 1.0) for n in r.nulls]
+        self.assertAlmostEqual(abs(r.effect_ratio - 1.0), min(claims))
+        self.assertAlmostEqual(r.p_value, max(n.p_value for n in r.nulls))
+
+    def test_argument_order_no_longer_changes_the_verdict(self):
+        forward = test_pair(self.a, self.b, confounds=[self.c], n_sim=99, seed=2)
+        reverse = test_pair(self.b, self.a, confounds=[self.c], n_sim=99, seed=2)
+        self.assertEqual(forward.verdict, reverse.verdict)
+        self.assertAlmostEqual(forward.effect_ratio, reverse.effect_ratio, places=9)
+
+    def test_one_way_is_still_available_and_is_asymmetric(self):
+        r = test_pair(self.a, self.b, confounds=[self.c], n_sim=49, seed=2,
+                      both_directions=False)
+        self.assertEqual(len(r.nulls), 1)
+        self.assertEqual(r.nulls[0].resampled, "a")
+
+
+class TestSensitivitySweepsIsolateOneThing(unittest.TestCase):
+    def setUp(self):
+        rng = random.Random(77)
+        hot = [(-84.0, 37.2), (-100.0, 40.0), (-115.0, 35.0)]
+        self.a = Layer("a", _cluster(rng, hot, 200, 1.5), tier="A")
+        self.b = Layer("b", _cluster(rng, hot, 200, 1.5), tier="A")
+
+    def test_cell_size_sweep_holds_the_bandwidth_fixed_in_km(self):
+        """Regression test for a false-positive generator.
+
+        Bandwidth was specified in CELLS, so sweeping cell size swept bandwidth with
+        it: 25/50/100 km cells carried 61/122/244 km kernels. The tool then attributed
+        a scale effect to the modifiable areal unit problem and advised discarding it.
+        """
+        sweeps = sensitivity(self.a, self.b, cell_sizes=(25.0, 50.0, 100.0),
+                             cell_km=50.0, n_sim=19, seed=1)
+        bandwidths = [r.bandwidth_km for r in sweeps["cell_size"]]
+        for bw in bandwidths[1:]:
+            self.assertAlmostEqual(bw, bandwidths[0], places=6)
+        self.assertEqual(len({r.grid["cell_km"] for r in sweeps["cell_size"]}), 3)
+
+    def test_bandwidth_sweep_holds_the_cell_size_fixed(self):
+        sweeps = sensitivity(self.a, self.b, sigmas=(1.0, 2.0, 4.0), cell_km=50.0,
+                             n_sim=19, seed=1)
+        self.assertEqual({r.grid["cell_km"] for r in sweeps["bandwidth"]}, {50.0})
+        self.assertEqual([r.bandwidth_km for r in sweeps["bandwidth"]],
+                         [50.0, 100.0, 200.0])
+
+
+class TestPresentation(unittest.TestCase):
+    """The display must not be able to argue for a conclusion the numbers have not
+    earned — but it does have to be readable."""
+
+    def test_null_plot_marks_an_observation_outside_the_null(self):
+        from coincidence.console import Style, null_plot
+        rng = random.Random(0)
+        values = [rng.gauss(1.0, 0.02) for _ in range(400)]
+        lines = null_plot(values, 1.4, Style(False), cols=80)
+        self.assertTrue(any("▲" in line for line in lines))
+        self.assertTrue(any("outside" in line for line in lines))
+
+    def test_null_plot_survives_a_degenerate_null(self):
+        from coincidence.console import Style, null_plot
+        self.assertEqual(null_plot([], 1.0, Style(False)), [])
+        self.assertTrue(null_plot([1.0] * 40, 1.0, Style(False)))
+
+    def test_style_is_inert_when_disabled(self):
+        from coincidence.console import Style
+        self.assertEqual(Style(False)("x", "bold", "red"), "x")
+        self.assertIn("x", Style(True)("x", "bold"))
+
+    def test_report_is_one_self_contained_file(self):
+        import base64
+        import re
+        import struct
+
+        from coincidence.analysis import prepare
+        from coincidence.report import render
+
+        rng = random.Random(8)
+        hot = [(-84.0, 37.2), (-100.0, 40.0)]
+        a = Layer("a", _cluster(rng, hot, 120, 1.5), tier="A")
+        b = Layer("b", _cluster(rng, hot, 140, 1.5), tier="A")
+        c = Layer("c", _cluster(rng, hot, 400, 2.0), tier="A")
+
+        prep = prepare(a, b, confounds=[c], cell_km=100.0, n_bins=4)
+        result = test_pair(a, b, confounds=[c], cell_km=100.0, n_sim=49, prep=prep)
+        bundle = {"tool": "coincidence", "version": "test",
+                  "inputs": [a.provenance(), b.provenance(), c.provenance()],
+                  "parameters": {"seed": 0}, "result": result.to_dict()}
+        page = render(result, prep, bundle)
+
+        self.assertNotIn("http://", page)
+        self.assertNotIn("https://", page)
+        self.assertIn(result.verdict, page.lower())
+        pngs = re.findall(r"data:image/png;base64,([A-Za-z0-9+/=]+)", page)
+        self.assertEqual(len(pngs), 4)  # a, b, a-under-null, and the confound
+        raw = base64.b64decode(pngs[0])
+        self.assertTrue(raw.startswith(b"\x89PNG\r\n\x1a\n"))
+        w, h = struct.unpack(">II", raw[16:24])
+        self.assertEqual((w, h), (prep.grid.nx, prep.grid.ny))
+
+    def test_a_negative_result_gets_the_same_treatment_as_a_positive(self):
+        """Not a style preference. A UI that renders 'no association' as smaller or
+        greyer undoes in presentation what the engine exists to do."""
+        from coincidence.cli import VERDICT_LABEL
+        self.assertEqual(len(VERDICT_LABEL), 3)
+        for label, colour in VERDICT_LABEL.values():
+            self.assertTrue(label.isupper())
+            self.assertTrue(colour)
+
+
+class TestCommandLine(unittest.TestCase):
+    def _run(self, argv) -> tuple[int, str]:
+        from coincidence.cli import main
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = main(argv)
+        return code, buf.getvalue()
+
+    def test_demo_runs_and_shows_the_collapse(self):
+        code, out = self._run(["demo"])
+        self.assertEqual(code, 0)
+        self.assertIn("worked example", out)
+        self.assertIn("confound", out)
+
+    def test_describe_reports_drops_without_guessing(self):
+        path = _tmp("d.csv", "lon,lat\n-84.0,37.2\n,\n-92.5,36.5\n")
+        code, out = self._run(["describe", path])
+        self.assertEqual(code, 0)
+        self.assertIn("dropped", out)
+
+    def test_unidentifiable_columns_show_what_the_file_actually_has(self):
+        path = _tmp("d.csv", "alpha,beta\n1.5,2.5\n")
+        code, out = self._run(["describe", path])
+        self.assertEqual(code, 2)
+        self.assertIn("alpha", out)
+        self.assertIn("2.5", out)  # a sample value, not just the column name
+        self.assertIn("--lat", out)
+
+    def test_test_command_writes_a_bundle_and_a_report(self):
+        d = tempfile.mkdtemp()
+        rows = "lon,lat\n" + "\n".join(
+            f"{-100 + i * 0.1},{40 + (i % 7) * 0.1}" for i in range(60)
+        )
+        a, b = _tmp("a.csv", rows), _tmp("b.csv", rows)
+        bundle, report = os.path.join(d, "x.json"), os.path.join(d, "x.html")
+        code, out = self._run(["test", a, b, "--sim", "19", "--no-color",
+                               "--export", bundle, "--report", report])
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(bundle))
+        self.assertTrue(os.path.exists(report))
+        with open(bundle, encoding="utf-8") as fh:
+            saved = json.load(fh)
+        self.assertIn("statement", saved["result"])
+        self.assertIn("uniform", out.lower())  # no confounds: it must say so
+
+    def test_json_output_is_parseable(self):
+        rows = "lon,lat\n" + "\n".join(
+            f"{-100 + i * 0.1},{40 + (i % 5) * 0.1}" for i in range(40)
+        )
+        code, out = self._run(["test", _tmp("a.csv", rows), _tmp("b.csv", rows),
+                               "--sim", "19", "--json"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["tool"], "coincidence")
 
 
 def _shoelace(pts):

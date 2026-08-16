@@ -138,6 +138,37 @@ def stratum_totals(raster: list[float], strata: Strata) -> dict[int, float]:
     return totals
 
 
+# Upper bound on the number of draws used to realize one stratum's mass.
+#
+# Draw count is normally the point count, because an unweighted layer's stratum total
+# IS its point count. A weighted layer breaks that: weight a layer by resident
+# population and a single stratum can total ten million, at which point the surrogate
+# loop is drawing ten million times per stratum per simulation and the tool appears to
+# hang. Capping trades granularity for termination — mass is still conserved exactly,
+# each draw simply carries more of it — and 20 000 draws already resolves any stratum
+# far past the resolution of the grid it lands on.
+MAX_DRAWS = 20_000
+
+
+def _draw_plan(totals: dict[int, float], strata: Strata):
+    """(cells, draws, unit) per stratum, in a fixed order.
+
+    Shared by `surrogate` and `surrogate_dot` so both consume the random stream
+    identically and a seed means the same thing whichever path runs.
+    """
+    for stratum, total in totals.items():
+        cells = strata.cells.get(stratum)
+        if not cells or total <= 0.0:
+            continue
+        # Multinomial over the stratum's cells via repeated draws, so the surrogate is
+        # a plausible realization rather than a smeared expectation.
+        draws = min(int(round(total)), MAX_DRAWS)
+        if draws <= 0:
+            yield cells, 1, total
+            continue
+        yield cells, draws, total / draws
+
+
 def surrogate(totals: dict[int, float], strata: Strata, rng: random.Random) -> list[float]:
     """One surrogate layer.
 
@@ -147,17 +178,34 @@ def surrogate(totals: dict[int, float], strata: Strata, rng: random.Random) -> l
     this is association not explained by the declared confounds.
     """
     out = [0.0] * len(strata.of_cell)
-    for stratum, total in totals.items():
-        cells = strata.cells.get(stratum)
-        if not cells or total <= 0.0:
-            continue
-        # Multinomial over the stratum's cells via repeated draws, so the surrogate is
-        # a plausible realization rather than a smeared expectation.
-        draws = int(round(total))
-        if draws <= 0:
-            out[rng.choice(cells)] += total
-            continue
-        unit = total / draws
+    for cells, draws, unit in _draw_plan(totals, strata):
+        n = len(cells)
         for _ in range(draws):
-            out[cells[rng.randrange(len(cells))]] += unit
+            out[cells[rng.randrange(n)]] += unit
     return out
+
+
+def surrogate_dot(
+    totals: dict[int, float], strata: Strata, rng: random.Random,
+    vectors: list[list[float]],
+) -> list[float]:
+    """The dot product of one surrogate against each of `vectors`, without ever
+    building the surrogate.
+
+    This exists because the co-location statistic only ever consults a surrogate
+    through inner products, and Gaussian smoothing is self-adjoint — so the smoothing
+    can be applied once to the fixed side and lifted out of the simulation loop
+    entirely (see `analysis._Prepared`). What remains per simulation is one lookup per
+    draw instead of a full convolution of the grid, which is the difference between a
+    Monte Carlo run that is interactive and one that is not.
+
+    Identical random stream to `surrogate`, so the two agree cell for cell.
+    """
+    acc = [0.0] * len(vectors)
+    for cells, draws, unit in _draw_plan(totals, strata):
+        n = len(cells)
+        for _ in range(draws):
+            i = cells[rng.randrange(n)]
+            for k, vec in enumerate(vectors):
+                acc[k] += unit * vec[i]
+    return acc

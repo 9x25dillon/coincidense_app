@@ -16,18 +16,21 @@ Pure standard library. No install, no build step, no network.
     print(result.statement())
 """
 
-from .analysis import TestResult, colocation, sensitivity, test_pair
+from .analysis import (
+    NullDistribution, Prepared, TestResult, colocation, prepare, sensitivity, test_pair,
+)
 from .grid import Grid, build_grid, smooth
 from .layers import TIERS, Layer
 from .loading import LoadError, load_layer
 from .nulls import build_strata, surrogate
 from .projection import Albers, CylindricalEqualArea, auto_projection
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Layer", "TIERS", "load_layer", "LoadError",
-    "test_pair", "sensitivity", "colocation", "TestResult",
+    "test_pair", "sensitivity", "colocation", "TestResult", "NullDistribution",
+    "prepare", "Prepared",
     "Grid", "build_grid", "smooth",
     "build_strata", "surrogate",
     "Albers", "CylindricalEqualArea", "auto_projection",

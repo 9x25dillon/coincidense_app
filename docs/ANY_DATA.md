@@ -10,12 +10,28 @@ wrapping one), JSON Lines / NDJSON, and GeoJSON.
 
 Coordinate columns are detected automatically from the usual names — `lat`/`latitude`/
 `y`/`decimalLatitude`, `lon`/`lng`/`long`/`longitude`/`x`, and others. When detection
-fails the loader raises rather than guessing, and you name them:
+fails the loader raises rather than guessing, and the error shows you what the file
+actually holds — every column with a sample value from the first row — so you can name
+the right ones without a second look:
 
 ```bash
 python3 -m coincidence describe mydata.csv
 python3 -m coincidence describe mydata.csv --lat POINT_Y --lon POINT_X
 ```
+
+`--lat`, `--lon` and `--weight` apply to both tested layers. When your files disagree
+about naming, override per layer: `--lat-a`/`--lon-a`/`--weight-a` for layer A,
+`-b` for layer B, and `-c` for every confound.
+
+```bash
+python3 -m coincidence test cases.csv towers.geojson \
+    --lat-a CASE_LAT --lon-a CASE_LON \
+    --confound census.csv --weight-c POP2020
+```
+
+Confound layers take weights too, which matters more than it sounds: a population
+confound is a set of place coordinates weighted by how many people live there, and
+unweighted it says only "somebody lives here".
 
 GeoJSON polygons collapse to the mean of their exterior ring. That is a real
 simplification — a whole county becomes one dot — and it is recorded rather than hidden.
@@ -73,8 +89,41 @@ simulation count, not evidence.
 
 **Always report the bandwidth with the ratio.** Layers coupled at 5 km read as 4.9x
 under a 25 km kernel and 1.1x under a 200 km kernel. Both numbers are correct answers to
-different questions. `--sensitivity` sweeps both grid resolution and bandwidth so a
-single parameter choice cannot silently decide your result.
+different questions. Set it directly with `--bandwidth-km`, or let the stated rule pick
+one from your sample size.
+
+`--sensitivity` sweeps grid resolution and bandwidth separately, each holding the other
+fixed, so a single parameter choice cannot silently decide your result — and so the two
+sweeps cannot be confused for each other. A conclusion that moves across *cell sizes* is
+a resolution artifact and should be discarded. A conclusion that moves across
+*bandwidths* is information about the scale at which your layers are coupled, and should
+be reported with the scale attached.
+
+**Both directions are run.** The null resamples one layer and holds the other fixed, and
+that is a different test depending on which one moves. The tool runs it both ways and
+reports the conservative answer, so the result cannot depend on the order you typed the
+files in. Both appear in the exported bundle. `--one-way` skips the second direction if
+you need the speed and accept the order-dependence.
+
+## Seeing it
+
+```bash
+python3 -m coincidence test a.csv b.csv --confound pop.csv --report finding.html
+```
+
+One self-contained HTML file — no network, no assets, no build step — with the verdict,
+the null distribution in ratio units, both directions of the test, the sensitivity
+sweeps, the provenance of every input, and the analysis surfaces themselves: layer A,
+layer B, each confound, and **one draw from the null** rendered beside them in the same
+colour ramp as A.
+
+That last panel is the one to look at. If the real layer A and a random draw from its
+null are hard to tell apart, you are looking at why the ratio came back near 1. Each
+panel is one pixel per analysis cell at the resolution the statistic actually used, so
+the grid is visible rather than smoothed into a plausible-looking continuous field, and
+three states are drawn distinctly: outside the observation window (not analysed, not
+drawn), inside it with no observation reaching (flat grey), and inside it with intensity
+(the ramp).
 
 ## Sharing a result
 
@@ -85,6 +134,8 @@ python3 -m coincidence test a.csv b.csv --confound pop.csv --export finding.json
 The bundle carries the inputs and their provenance, every parameter, the null
 specification, the random seed, and the result. Anyone with the same files can re-run it
 and get the same numbers — or change the confound set and show you why you were wrong.
+The HTML report embeds the same bundle in a `<script type="application/json">` tag, so a
+report that arrives by email can still be re-run.
 
 That last part is the point. A claim that comes with its null model attached is a claim
 someone can argue with precisely, instead of trading screenshots.

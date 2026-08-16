@@ -4,11 +4,16 @@ Phases are ordered by dependency, not by calendar. Each phase states its deliver
 the condition under which it is done.
 
 **Where things actually stand:** the general engine (originally Phase 5) was pulled
-forward and built first. Phases 1–3 — verifying the North America sources, ingesting
-them, and rendering the map — are the remaining work. Building the analytical core
-before the case study turned out to be the right order: it forced the confound
-machinery to be general, and it surfaced four false-positive-generating defects on
-synthetic data where ground truth was known, rather than on real data where it isn't.
+forward and built first, and Phase 4 came with it. Phase 3's render layer now exists in
+a general form — `--report` writes the analysis surfaces, the null distribution and one
+draw from the null as a self-contained HTML page — but against user-supplied layers
+rather than against the North America case study. Phases 1–2, verifying and ingesting
+the case-study sources, are the remaining work.
+
+Building the analytical core before the case study turned out to be the right order: it
+forced the confound machinery to be general, and it surfaced six false-positive- or
+false-dismissal-generating defects on synthetic data where ground truth was known,
+rather than on real data where it isn't.
 
 ## Phase 0 — Specification (current)
 
@@ -68,13 +73,14 @@ The first thing a user can look at.
 
 The actual product.
 
-- [ ] Kernel density per layer with a stated bandwidth-selection rule
-- [ ] Stratified surrogate generation preserving the confound structure
-- [ ] Monte Carlo co-location testing against surrogates
-- [ ] Effect sizes with confidence intervals
-- [ ] Sensitivity reporting across bandwidth and cell size (MAUP)
-- [ ] Null-model visualization — users see what chance looks like
-- [ ] Plain-language result statements, including for negative results
+- [x] Kernel density per layer with a stated bandwidth-selection rule
+- [x] Stratified surrogate generation preserving the confound structure
+- [x] Monte Carlo co-location testing against surrogates, in both directions
+- [x] Effect sizes with confidence intervals
+- [x] Sensitivity reporting across bandwidth and cell size, each isolating one parameter
+- [x] Null-model visualization — the simulated null in the terminal, and one draw from
+      it rendered beside the observation in the HTML report
+- [x] Plain-language result statements, including for negative results
 
 **Done when:** for any layer pair or triple, the app returns an effect size, an interval,
 the null specification, and a statement of what it does and does not license — and displays
@@ -93,6 +99,10 @@ a failure to beat the null as prominently as a success.
 - [x] Reproducible export bundle: inputs, provenance, parameters, null spec, seed
 - [x] Worked synthetic example where the confounded association demonstrably evaporates
 - [x] Test suite, including the project's central claim as an executable assertion
+- [x] Self-contained HTML report: surfaces, null draw, sweeps, provenance, no assets
+- [x] Per-layer column and weight overrides; weighted confounds
+- [x] Interactive-speed nulls — the smoothing is hoisted out of the simulation loop
+      by self-adjointness, exactly rather than approximately
 - [ ] User-supplied study boundary, to replace the inferred convex-hull window
 - [ ] Areal support for polygons instead of collapsing them to representative points
 - [ ] Confound declaration enforced as a required step rather than a strong default
@@ -100,6 +110,37 @@ a failure to beat the null as prominently as a success.
 **Done when:** someone can bring an unrelated claimed coincidence and get an honest answer
 without modifying the codebase. *Substantially met* — the remaining items lower the
 noise floor and widen the geometry support rather than adding capability.
+
+## Phase 6 — What would extend the method
+
+Ordered by how much each changes what the tool can answer, not by effort.
+
+- [ ] **A real study boundary** (`--boundary region.geojson`). The single highest-value
+      item: it is what the 10% noise floor is paying for. A supplied polygon replaces
+      the convex hull, and the floor can then be derived from the geometry instead of
+      assumed. Everything else on this list is worth less than this one.
+- [ ] **Areal support.** Polygons currently collapse to a representative point, so a
+      reservation and a cave entrance carry the same weight in the raster. Rasterizing
+      by area overlap would fix the largest remaining input distortion.
+- [ ] **Three or more layers.** The vision names triples; the engine is pairwise. The
+      honest generalization is a partial statistic — does A×B survive conditioning on C
+      *as a layer* rather than as a stratum — which is a different and more useful
+      question than a three-way overlap.
+- [ ] **Continuous confounds without point proxies.** Karst extent, terrain ruggedness
+      and population density are surfaces, not point sets. Accepting a raster or a
+      gridded CSV directly would remove the "scatter points to represent a field" step,
+      which is currently the clumsiest part of using the tool on real data.
+- [ ] **Temporal alignment.** Layer vintages differ by years to decades and the tool is
+      silent about it. Carrying a date range per layer and refusing, or at least
+      warning, on non-overlapping vintages would catch a whole class of spurious
+      comparison the confound machinery cannot see.
+- [ ] **A confound-search mode.** Given a claimed association and a directory of
+      candidate confound layers, report which single confound most reduces the effect.
+      This inverts the tool's ergonomics from "prove me wrong" to "find me the
+      explanation", and it is the feature most likely to change how someone reasons.
+- [ ] **Power reporting.** A negative result currently cannot distinguish "no effect"
+      from "not enough data to see one". Simulating a planted effect at the observed
+      sample size would say which.
 
 ## Open questions
 
