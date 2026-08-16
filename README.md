@@ -1,5 +1,8 @@
 # Coincidence App
 
+[![tests](https://github.com/9x25dillon/coincidense_app/actions/workflows/tests.yml/badge.svg)](https://github.com/9x25dillon/coincidense_app/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-0f766e.svg)](LICENSE)
+
 A tool for testing whether apparent spatial coincidence survives contact with base rates.
 
 Bring any two located datasets and the things you think already explain where they occur.
@@ -131,7 +134,11 @@ precisely, rather than trading screenshots.
 python3 -m unittest discover -s tests -v
 ```
 
-76 tests, including the executable form of the project's central claim: a confounded
+Every push runs them on Python 3.10 through 3.14, plus an end-to-end pass over the CLI:
+the worked example must still collapse, the report must still render with no external
+reference in it, and a malformed file must still fail cleanly.
+
+79 tests, including the executable form of the project's central claim: a confounded
 association must collapse when conditioned, a genuine one must survive, and two
 independent layers must come back as unrelated. Several were written after the
 implementation got those wrong — eight defects so far, each of which produced confident
@@ -154,6 +161,7 @@ and no missing person appears on a map by name. See [`docs/ETHICS.md`](docs/ETHI
 ## Repository layout
 
 ```
+.github/workflows/          CI: the suite on five Python versions, plus a CLI pass
 coincidence/                the engine
   loading.py                any format in — CSV, JSON, JSONL, GeoJSON
   boundary.py               declared study region: GeoJSON polygons, holes included

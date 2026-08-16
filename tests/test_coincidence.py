@@ -754,6 +754,69 @@ class TestPresentation(unittest.TestCase):
             self.assertTrue(colour)
 
 
+class TestPromises(unittest.TestCase):
+    """The README's headline claims, as checks rather than assertions of good faith.
+
+    "No install, no dependencies, no network, no build step" is the reason this thing
+    runs on a field laptop and will still run in ten years. It is also the easiest
+    promise in the project to break by accident, in a single convenient import.
+    """
+
+    PACKAGE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "coincidence")
+
+    def _imports(self) -> dict[str, set[str]]:
+        import ast
+        found: dict[str, set[str]] = {}
+        for name in sorted(os.listdir(self.PACKAGE)):
+            if not name.endswith(".py"):
+                continue
+            tree = ast.parse(open(os.path.join(self.PACKAGE, name), encoding="utf-8").read())
+            mods = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    mods.update(a.name.split(".")[0] for a in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    mods.add(node.module.split(".")[0])
+            found[name] = mods
+        return found
+
+    def test_the_package_imports_nothing_outside_the_standard_library(self):
+        allowed = set(sys.stdlib_module_names) | {"coincidence", "__future__"}
+        offenders = {
+            name: sorted(mods - allowed) for name, mods in self._imports().items()
+            if mods - allowed
+        }
+        self.assertEqual(offenders, {},
+                         f"third-party imports would break the no-install promise: {offenders}")
+
+    def test_the_engine_does_not_reach_the_network(self):
+        """Nothing here should ever open a socket. A tool that phones home cannot be
+        run on data its custodian has not agreed to send anywhere."""
+        networked = {"socket", "urllib", "http", "ftplib", "smtplib", "requests",
+                     "asyncio", "ssl", "telnetlib", "xmlrpc", "webbrowser"}
+        offenders = {name: sorted(mods & networked)
+                     for name, mods in self._imports().items() if mods & networked}
+        self.assertEqual(offenders, {})
+
+    def test_the_package_runs_under_an_isolated_interpreter(self):
+        """`-I` ignores site-packages and environment variables, so this fails if the
+        engine has come to depend on anything installed alongside it."""
+        import subprocess
+        root = os.path.dirname(self.PACKAGE)
+        # -I also drops the working directory from sys.path, so the package is put back
+        # explicitly. What stays excluded is site-packages and the environment, which is
+        # the thing under test.
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c",
+             f"import sys; sys.path.insert(0, {root!r}); "
+             f"import coincidence; print(coincidence.__version__)"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(proc.stdout.strip())
+
+
 class TestCommandLine(unittest.TestCase):
     def _run(self, argv) -> tuple[int, str]:
         from coincidence.cli import main

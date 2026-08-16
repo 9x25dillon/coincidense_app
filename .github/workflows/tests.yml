@@ -1,0 +1,97 @@
+name: tests
+
+# The suite is the check. This workflow only supplies what a laptop cannot: several
+# interpreter versions, and a clean checkout that shares nothing with the machine the
+# code was written on.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # No install step, deliberately. If one ever becomes necessary here, the
+      # "no install, no dependencies" promise in the README has been broken and the
+      # promise tests in the suite should have failed first.
+
+      - name: Run the suite
+        run: python -m unittest discover -s tests -v
+
+  cli:
+    name: cli end to end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: The worked example must still collapse
+        run: |
+          python -m coincidence demo | tee demo.txt
+          grep -q "it was the confound all along" demo.txt
+
+      - name: Generate the example data
+        run: python examples/make_synthetic.py
+
+      - name: Describe a layer
+        run: python -m coincidence describe examples/layer_a.csv
+
+      - name: Test a pair, export a bundle and render a report
+        run: |
+          python -m coincidence test examples/layer_a.csv examples/layer_b.csv \
+            --confound examples/confound_c.csv --bins 10 \
+            --tier-a A --tier-b A --sim 199 --sensitivity \
+            --export finding.json --report finding.html
+
+      - name: The report must be self-contained
+        run: |
+          python - <<'PY'
+          import json, pathlib, re, sys
+
+          page = pathlib.Path("finding.html").read_text(encoding="utf-8")
+          external = re.findall(r'(?:src|href)="(https?://[^"]+)"', page)
+          if external:
+              sys.exit(f"report reaches off-host, which it must never do: {external}")
+          if "data:image/png;base64," not in page:
+              sys.exit("report has no rendered surfaces")
+
+          bundle = json.loads(pathlib.Path("finding.json").read_text(encoding="utf-8"))
+          for key in ("inputs", "parameters", "result"):
+              if key not in bundle:
+                  sys.exit(f"bundle is not re-runnable: missing {key!r}")
+          print("report", len(page), "bytes; bundle carries",
+                len(bundle["inputs"]), "inputs and seed",
+                bundle["parameters"]["seed"])
+          PY
+
+      - name: A bad file must fail cleanly, not crash
+        run: |
+          printf 'alpha,beta\n1.5,2.5\n' > bad.csv
+          if python -m coincidence describe bad.csv; then
+            echo "expected a non-zero exit on unidentifiable columns"; exit 1
+          fi
+          python -m coincidence describe bad.csv 2>&1 | grep -q -- "--lat"
