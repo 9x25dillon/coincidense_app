@@ -7,25 +7,18 @@ It answers one question: **does the overlap exceed what those confounds already 
 
 Pure Python standard library. No install, no dependencies, no network, no build step.
 
+**[Start with the ten-minute tutorial →](https://9x25dillon.github.io/coincidense_app/)**
+
 ## Try it in thirty seconds
 
 ```bash
 python3 -m coincidence demo
 ```
 
+![The worked example: a 3.15x association collapsing to 1.09x once the confound is declared](docs/images/demo.png)
+
 Two synthetic layers that both cluster where a third thing is, and are otherwise
-unrelated to each other. The naive question reports a large, overwhelmingly significant
-association. Declare the thing that actually drives both and it evaporates:
-
-```
-  1. The overlay question — no confounds declared
-     effect 3.15×   p = 0.0033   — a large, overwhelmingly significant association
-
-  2. The base-rate question — conditioned on C
-     effect 1.09×   p = 0.0033   — it was the confound all along
-```
-
-There is no relationship between those two layers; the generator built them
+unrelated to each other. There is no relationship between them; the generator built them
 independently. The gap between those two numbers is the entire reason this project
 exists.
 
@@ -90,9 +83,13 @@ cannot quietly decide your result.
 **The null is drawn, not asserted.** The terminal prints the simulated null as a
 distribution with the observation marked on it, in the same units as the headline ratio.
 `--report` writes a self-contained HTML page carrying the analysis surfaces themselves —
-layer A, layer B, and *one draw from the null beside them*. When the observation and the
-null draw look alike, you can see why the number came back near 1 instead of taking the
-tool's word for it.
+layer A, layer B, and *one draw from the null beside them*.
+
+![Four map panels: layer A, layer B, layer A under the null, and the confound surface](docs/images/report-maps.png)
+
+Look at the third panel. That is layer A as chance would have arranged it, given the
+confound. When it is hard to tell from the real thing beside it, you can see why the
+number came back near 1 instead of taking the tool's word for it.
 
 **Negative results are printed.** "No association beyond chance" gets the same banner,
 the same colour weight, and the same space as a positive, because it is equally a
@@ -103,12 +100,22 @@ the other fixed, which is a different test depending on which one moves. Both di
 are run and the conservative one is reported.
 
 **The study region is yours to declare.** `--boundary region.geojson` replaces the
-inferred convex hull with the real thing. This matters more than it sounds: on a
-crescent-shaped region, two layers scattered *independently* read **1.31x** under the
-inferred hull — a confident false positive at three times the noise floor meant to
-suppress it. With the boundary declared they read 1.005x. Coastlines, valley floors and
-river corridors are all that shape, so the tool now detects the signature and says so.
-Declaring a boundary also lowers the floor from 10% to 4%.
+inferred convex hull with the real thing. This matters more than it sounds — below are
+two layers scattered *independently* inside a crescent-shaped survey area, so the true
+answer is nothing:
+
+| over 8 trials | inferred convex hull | declared boundary |
+|---|---|---|
+| mean effect | **1.307×** — a false positive | **1.005×** |
+| worst deviation | 33.4% | 1.9% |
+
+![Terminal output without a declared boundary, reporting a 1.31x false positive](docs/images/boundary-without.png)
+
+A confident false positive at three times the noise floor meant to suppress it.
+Coastlines, valley floors and river corridors are all that shape. The tool reports how
+much of an inferred window no observation reaches — an upper bound on the over-coverage,
+not a claim about your geometry, because clustering and concavity are not separable from
+the points alone. Declaring a boundary also lowers the floor from 10% to 4%.
 
 **Provenance is a type.** Every layer carries an evidence tier through ingest, analysis,
 and output. Data loads as *uncertain* until you assert otherwise — see
@@ -124,10 +131,10 @@ precisely, rather than trading screenshots.
 python3 -m unittest discover -s tests -v
 ```
 
-75 tests, including the executable form of the project's central claim: a confounded
+76 tests, including the executable form of the project's central claim: a confounded
 association must collapse when conditioned, a genuine one must survive, and two
 independent layers must come back as unrelated. Several were written after the
-implementation got those wrong — seven defects so far, each of which produced confident
+implementation got those wrong — eight defects so far, each of which produced confident
 false positives or false dismissals, all written up in
 [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md#what-went-wrong-on-the-way-here) rather than
 quietly fixed.
@@ -158,6 +165,8 @@ coincidence/                the engine
   report.py                 self-contained HTML report with the analysis surfaces
   cli.py                    demo / describe / test
 docs/
+  index.html                the ten-minute tutorial (served at GitHub Pages)
+  images/                   screenshots, all captured from real output
   ANY_DATA.md               input contract, reading results, limitations
   EVIDENCE_STANDARDS.md     tiering and how it's enforced
   METHODOLOGY.md            confounds, null construction, and what went wrong

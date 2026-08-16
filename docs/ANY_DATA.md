@@ -129,9 +129,14 @@ boundary declared, the same data reads **1.005×**.
 | declared boundary | 1.005× | 1.9% |
 
 Coastlines, valley floors, river corridors, mountain arcs and anything with a lake in it
-are all that shape. The tool measures how much of an inferred window is reached by no
-observation at all and warns above 5%, but the warning is a prompt to supply the
-boundary, not a substitute for it.
+are all that shape.
+
+The tool reports how much of an inferred window no observation reaches, which is an
+upper bound on how much the hull may be over-covering. It is *not* a concavity
+detector and does not claim to be: clustered points inside a perfectly convex region
+score higher than a genuine crescent. Nothing computed from your points can tell you
+whether your region is concave — that is knowledge about the world, which is exactly
+why the boundary has to be declared rather than inferred.
 
 Three things change when you declare one:
 
